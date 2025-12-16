@@ -1,0 +1,14 @@
+services:
+  tvbot:
+    build: ./app/tv-binance-bot
+    container_name: tvbot
+    restart: unless-stopped
+    env_file:
+      - ./app/tv-binance-bot/.env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+    command: >
+      sh -lc "ln -sf /data/trading_bot.db /app/trading_bot.db &&
+              python -m uvicorn main:app --host 0.0.0.0 --port 8000"

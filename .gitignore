@@ -1,0 +1,24 @@
+# Secrets / env
+.env
+**/.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Local data / db
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Mac zip artifacts
+__MACOSX/

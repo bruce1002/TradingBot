@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradingView Binance Bot - Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <!-- 頁面 Header -->
+    <header class="page-header">
+        <h1>TradingView Binance Bot Dashboard</h1>
+        <div class="user-info">
+            <span>登入帳號：{{ user_email or "未知" }}</span>
+            <button id="logout-btn">登出</button>
+        </div>
+    </header>
+
+    <!-- 主要內容區 -->
+    <main class="page-main">
+        <!-- 倉位表格區塊 -->
+        <section class="positions-section">
+            <div class="positions-header">
+                <h2>📒 Positions</h2>
+                <div class="positions-tabs">
+                    <button class="tab-button active" data-tab="bot">Bot Positions</button>
+                    <button class="tab-button" data-tab="binance">Binance Live Positions</button>
+                    <button class="tab-button" data-tab="signals">Signals</button>
+                    <button class="tab-button" data-tab="bots">Bots</button>
+                </div>
+            </div>
+            
+            <!-- Trailing Settings -->
+            <div class="trailing-settings">
+                <label class="setting-item">
+                    <span>PnL% threshold (%):</span>
+                    <input type="number" id="profit-threshold" step="0.1" min="0" class="setting-input">
+                </label>
+                <label class="setting-item">
+                    <span>Lock ratio:</span>
+                    <input type="number" id="lock-ratio" step="0.05" min="0" max="1" class="setting-input">
+                </label>
+                <label class="setting-item">
+                    <span>Base SL (%):</span>
+                    <input type="number" id="base-sl" step="0.1" min="0" class="setting-input">
+                </label>
+                <button id="save-trailing-settings" class="action-btn">Save</button>
+                <div class="setting-note">
+                    <small>Note: Dynamic Stop and Auto close are always enabled by default.</small>
+                </div>
+            </div>
+            
+            <p class="subtitle">
+                <span class="tag-dyn">Dynamic Stop</span>
+                vs
+                <span class="tag-base">Base Stop-Loss</span>
+            </p>
+
+            <!-- Bot Positions -->
+            <div id="bot-positions-container" class="positions-container active">
+                <!-- Filter and Delete Section -->
+                <div class="positions-filter-section">
+                    <h3>Filter & Manage Positions</h3>
+                    <div class="filter-row">
+                        <label>
+                            Symbol:
+                            <select id="filter-symbol">
+                                <option value="">All</option>
+                            </select>
+                        </label>
+                        <label>
+                            Status:
+                            <select id="filter-status">
+                                <option value="">All</option>
+                                <option value="OPEN">OPEN</option>
+                                <option value="CLOSED">CLOSED</option>
+                                <option value="ERROR">ERROR</option>
+                            </select>
+                        </label>
+                        <label>
+                            From Date:
+                            <input type="date" id="filter-start-date">
+                        </label>
+                        <label>
+                            To Date:
+                            <input type="date" id="filter-end-date">
+                        </label>
+                        <button id="apply-filter-btn" class="action-btn">Apply Filter</button>
+                        <button id="clear-filter-btn" class="btn-secondary">Clear</button>
+                    </div>
+                    <div class="delete-actions-row">
+                        <label>
+                            Delete positions older than (days):
+                            <input type="number" id="delete-days" min="1" max="365" value="30" style="width: 80px;">
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="delete-include-error">
+                            <span>Include ERROR positions</span>
+                        </label>
+                        <button id="delete-old-positions-btn" class="btn-danger">Delete Old Positions</button>
+                        <button id="clear-error-positions-btn" class="btn-danger">Clear All ERROR Positions</button>
+                        <button id="bot-export-excel" class="action-btn">Export Excel</button>
+                    </div>
+                </div>
+                
+                <div id="positions-table-container">
+                    <!-- 載入中... -->
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        載入中...
+                    </div>
+                </div>
+                
+                <!-- 日期篩選和統計區塊（在表格下方） -->
+                <div class="bot-stats-section">
+                    <!-- 日期篩選和匯出按鈕 -->
+                    <div id="bot-positions-filter" class="bot-filter-row">
+                        <label>From: <input type="date" id="bot-start-date"></label>
+                        <label>To: <input type="date" id="bot-end-date"></label>
+                        <button id="bot-apply-filter" class="action-btn">Apply</button>
+                    </div>
+                    
+                    <!-- 統計資訊 -->
+                    <div id="bot-positions-stats" class="bot-stats-row">
+                        <!-- 由 JS 注入內容 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Binance Live Positions -->
+            <div id="binance-positions-container" class="positions-container">
+                <div id="binance-table-container">
+                    <!-- 載入中... -->
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        載入中...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signals -->
+            <div id="signals-container" class="positions-container">
+                <!-- Signal Configs Section -->
+                <div id="signal-configs-section">
+                    <div class="bots-header-row">
+                        <h2 class="section-title">TradingView Signals</h2>
+                        <div style="display: flex; gap: 10px;">
+                            <button id="clear-signal-logs-btn" class="btn-danger">Clear Signal Logs</button>
+                            <button id="btn-open-signal-form" class="action-btn">New Signal</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Signal Create/Edit Form (Initially Hidden) -->
+                    <div id="signal-form-container" class="bot-form-card" style="display:none;">
+                        <h3 id="signal-form-title">Create New Signal</h3>
+                        <form id="signal-create-form">
+                            <!-- First Row: Name / Signal Key -->
+                            <div class="form-row">
+                                <label>
+                                    Name <span class="required">*</span>
+                                    <input type="text" id="signal-name" required placeholder="Signal name" />
+                                </label>
+                                <label>
+                                    Signal Key <span class="required">*</span>
+                                    <input type="text" id="signal-key" required placeholder="Unique signal key" />
+                                </label>
+                            </div>
+
+                            <!-- Second Row: Symbol Hint / Timeframe Hint -->
+                            <div class="form-row">
+                                <label>
+                                    Symbol Hint
+                                    <input type="text" id="signal-symbol-hint" placeholder="e.g. BTCUSDT" />
+                                </label>
+                                <label>
+                                    Timeframe
+                                    <input type="text" id="signal-timeframe-hint" placeholder="e.g. 15m / 1h" />
+                                </label>
+                            </div>
+
+                            <!-- Third Row: Description / Enabled -->
+                            <div class="form-row">
+                                <label>
+                                    Description
+                                    <input type="text" id="signal-description" placeholder="Signal description" />
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="signal-enabled" checked />
+                                    <span>Enabled</span>
+                                </label>
+                            </div>
+
+                            <!-- TradingView Alert Template -->
+                            <div class="form-row">
+                                <label style="flex: 1 1 100%;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                        <span>TradingView Alert Template</span>
+                                        <button type="button" id="btn-copy-alert-template" class="action-btn" style="padding: 4px 12px; font-size: 12px; height: auto;">
+                                            <span id="copy-btn-text">Copy</span>
+                                        </button>
+                                    </div>
+                                    <textarea id="signal-alert-template" readonly rows="8" style="width: 100%; padding: 8px; background-color: var(--tbl-bg); border: 1px solid var(--tbl-border); color: var(--tbl-text); border-radius: 4px; font-family: monospace; font-size: 12px;"></textarea>
+                                    <small style="color: var(--tbl-muted); font-size: 11px;">複製此 JSON 到 TradingView Alert 設定中</small>
+                                </label>
+                            </div>
+
+                            <!-- Form Actions -->
+                            <div class="form-actions">
+                                <button type="submit" class="action-btn" id="signal-form-submit-btn">Save</button>
+                                <button type="button" id="btn-cancel-signal-form" class="action-btn">Cancel</button>
+                            </div>
+
+                            <div id="signal-form-error" class="form-error" style="display:none;"></div>
+                        </form>
+                    </div>
+                    
+                    <!-- Signal Configs Table -->
+                    <div id="signal-configs-table-container">
+                        <!-- 載入中... -->
+                        <div class="loading-state">
+                            <div class="loading-spinner"></div>
+                            載入中...
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Signal Logs (保留原有功能) -->
+                <div id="signals-table-container" style="margin-top: 32px;">
+                    <h3 class="section-title">Signal Logs</h3>
+                    <!-- 載入中... -->
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        載入中...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bots -->
+            <div id="bots-container" class="positions-container">
+                <!-- Bots Header with New Bot Button -->
+                <div class="bots-header-row">
+                    <h2 class="section-title">Bots</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <!-- Bulk Update Invest Amount Section -->
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="number" step="0.01" min="0" id="bulk-update-invest-amount" placeholder="Investment (USDT)" style="width: 150px; padding: 6px 10px; background-color: var(--tbl-bg); border: 1px solid var(--tbl-border); color: var(--tbl-text); border-radius: 4px;" />
+                            <button id="btn-bulk-update-invest-amount" class="action-btn" style="padding: 6px 16px;">Update All Bots</button>
+                        </div>
+                        <button id="btn-open-bot-form" class="action-btn">New Bot</button>
+                    </div>
+                </div>
+                
+                <!-- Bulk Update Result Message -->
+                <div id="bulk-update-result" style="display: none; margin: 10px 0; padding: 10px; border-radius: 4px;"></div>
+                
+                <!-- Bot Create Form (Initially Hidden) -->
+                <div id="bot-form-container" class="bot-form-card" style="display:none;">
+                    <h3>Create New Bot</h3>
+                    <form id="bot-create-form">
+                        <!-- First Row: Name / Bot Key -->
+                        <div class="form-row">
+                            <label>
+                                Name <span class="required">*</span>
+                                <input type="text" id="bot-name" required placeholder="Bot name" />
+                            </label>
+                            <label>
+                                Bot Key <span class="required">*</span>
+                                <input type="text" id="bot-key" required placeholder="Unique bot key" />
+                            </label>
+                        </div>
+
+                        <!-- Second Row: Symbol / Qty / Max Invest USDT / Leverage -->
+                        <div class="form-row">
+                            <label>
+                                Symbol <span class="required">*</span>
+                                <input list="symbol-suggestions" id="bot-symbol" required placeholder="BTCUSDT" />
+                                <datalist id="symbol-suggestions">
+                                    <!-- JS will populate this -->
+                                </datalist>
+                            </label>
+                            <label class="with-tooltip">
+                                Qty
+                                <input type="number" step="0.0001" min="0" id="bot-qty" placeholder="0.01" />
+                                <span class="tooltip-icon" title="交易數量（當 Max Invest USDT 未設定時使用）">?</span>
+                            </label>
+                            <label class="with-tooltip">
+                                Max Invest (USDT)
+                                <input type="number" step="0.01" min="0" id="bot-max-invest-usdt" placeholder="50.0" />
+                                <span class="tooltip-icon" title="最大投資金額（USDT）。如果設定，系統會根據當前價格自動計算 qty，且不會超過此金額">?</span>
+                            </label>
+                            <label>
+                                Leverage <span class="required">*</span>
+                                <input type="number" step="1" min="1" max="125" id="bot-leverage" required placeholder="5" />
+                            </label>
+                        </div>
+
+                        <!-- Third Row: Signal / Side Source -->
+                        <div class="form-row">
+                            <label>
+                                Signal
+                                <select id="bot-signal-id">
+                                    <option value="">(None - independent bot)</option>
+                                    <!-- JS will populate this -->
+                                </select>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="bot-use-signal-side" checked />
+                                <span>Use side from TradingView signal</span>
+                            </label>
+                            <label>
+                                Fixed Side
+                                <select id="bot-fixed-side">
+                                    <option value="">(None - use signal side)</option>
+                                    <option value="BUY">LONG (Buy)</option>
+                                    <option value="SELL">SHORT (Sell)</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <!-- Fourth Row: Dynamic Stop Settings -->
+                        <div class="form-row">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="bot-use-dynamic-stop" checked />
+                                <span>Enable Dynamic Stop</span>
+                                <span class="tooltip-icon" title="勾選後，此 bot 會使用動態停損：達到獲利門檻後，鎖住部分獲利並追蹤停利">?</span>
+                            </label>
+                            <label class="with-tooltip">
+                                Dynamic Lock (%)
+                                <input type="number" step="0.1" min="0" max="100" id="bot-trailing-callback-percent" placeholder="10.0" />
+                                <span class="tooltip-icon" title="鎖利比例：例如 50% 代表一旦達到獲利門檻後，系統會鎖住已實現獲利的一半，價格回撤到該價位時觸發停損">?</span>
+                            </label>
+                            <label class="with-tooltip">
+                                Base SL (%)
+                                <input type="number" step="0.1" min="0" max="100" id="bot-base-stop-loss-pct" placeholder="5.0" />
+                                <span class="tooltip-icon" title="基礎停損：未達成動態停利門檻前，若價格反向超過此百分比，則觸發停損">?</span>
+                            </label>
+                        </div>
+
+                        <!-- Fifth Row: Enabled -->
+                        <div class="form-row">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="bot-enabled" checked />
+                                <span>Enabled</span>
+                            </label>
+                        </div>
+
+                        <!-- Form Actions -->
+                        <div class="form-actions">
+                            <button type="submit" class="action-btn">Create Bot</button>
+                            <button type="button" id="btn-cancel-bot-form" class="action-btn">Cancel</button>
+                        </div>
+
+                        <div id="bot-form-error" class="form-error" style="display:none;"></div>
+                    </form>
+                </div>
+                
+                <div id="bots-table-container">
+                    <!-- 載入中... -->
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        載入中...
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Signal Detail Modal -->
+    <div id="signal-detail-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Signal Detail</h3>
+          <button id="signal-detail-close" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-section">
+            <h4>Metadata</h4>
+            <pre id="signal-detail-meta"></pre>
+          </div>
+          <div class="modal-section">
+            <h4>Raw Payload</h4>
+            <pre id="signal-detail-raw"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bot Creation Confirmation Modal -->
+    <div id="bot-confirm-modal" class="modal hidden">
+      <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+          <h3>Confirm Bot Creation</h3>
+          <button id="bot-confirm-close" class="modal-close">×</button>
+        </div>
+        <div class="modal-body">
+          <p style="margin-bottom: 20px; color: var(--tbl-text);">Please review the bot configuration before creating:</p>
+          <div id="bot-confirm-details" style="background-color: var(--tbl-bg-alt); padding: 16px; border-radius: 6px; border: 1px solid var(--tbl-border);">
+            <!-- Details will be populated by JavaScript -->
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--tbl-border);">
+          <button id="bot-confirm-cancel" class="action-btn" style="background-color: var(--tbl-bg-alt); color: var(--tbl-text);">Cancel</button>
+          <button id="bot-confirm-submit" class="action-btn">Confirm & Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>
