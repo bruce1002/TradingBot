@@ -186,16 +186,18 @@ async def trailing_stop_worker():
         db = SessionLocal()
         try:
             # 從資料庫找出所有需要檢查的倉位
+            # 只檢查 bot_stop_loss_enabled=True 的倉位（如果為 False，則跳過 Bot 內建的停損機制）
             # 只要是 status == "OPEN" 的倉位，就至少要吃 base stop（即使沒有設定 trail_callback）
             # Dynamic Stop 是否啟用由 DYN_TRAILING_ENABLED 和 lock_ratio 來決定
             positions = (
                 db.query(Position)
                 .filter(Position.status == "OPEN")
+                .filter(Position.bot_stop_loss_enabled == True)
                 .all()
             )
             
             if positions:
-                logger.info(f"檢查 {len(positions)} 個開啟的倉位（資料庫中的倉位）")
+                logger.info(f"檢查 {len(positions)} 個開啟的倉位（bot_stop_loss_enabled=True）")
                 # 記錄沒有 lock_ratio 的倉位（只使用 base stop）
                 positions_without_lock = [p for p in positions if p.trail_callback is None]
                 if positions_without_lock:
@@ -925,10 +927,17 @@ async def check_trailing_stop(position: Position, db: Session):
     1. 當 PnL% 達到門檻時，鎖住一部分利潤作為停損線
     2. 否則使用 base stop-loss（固定百分比停損）
     
+    注意：此函數只會在 bot_stop_loss_enabled=True 時被調用。
+    
     Args:
         position: Position 模型實例
         db: 資料庫 Session
     """
+    # 雙重檢查：如果 bot_stop_loss_enabled 為 False，直接返回
+    if not position.bot_stop_loss_enabled:
+        logger.debug(f"倉位 {position.id} ({position.symbol}) bot_stop_loss_enabled=False，跳過 Bot 停損檢查")
+        return
+    
     try:
         # 取得目前標記價格
         current_price = get_mark_price(position.symbol)
@@ -1446,6 +1455,9 @@ class PositionOut(BaseModel):
     stop_mode: Optional[str] = None  # "dynamic", "base", "none"
     base_stop_price: Optional[float] = None
     dynamic_stop_price: Optional[float] = None
+    # 停損/止盈機制控制
+    bot_stop_loss_enabled: bool = True
+    tv_signal_close_enabled: bool = True
 
 
 class TrailingUpdate(BaseModel):
@@ -2401,29 +2413,37 @@ async def webhook_tradingview(
                                 results.append(f"bot={bot.id}, error=current_position_not_found")
                                 logger.warning(f"Bot {bot.id} 目標為平倉，但找不到當前倉位記錄")
                             else:
-                                try:
-                                    close_order = close_futures_position(
-                                        symbol=symbol,
-                                        position_side=current_position.side,
-                                        qty=current_position.qty,
-                                        position_id=current_position.id
+                                # 檢查 tv_signal_close_enabled 標誌
+                                if not current_position.tv_signal_close_enabled:
+                                    results.append(f"bot={bot.id}, result=tv_signal_close_disabled, position_id={current_position.id}")
+                                    logger.info(
+                                        f"Bot {bot.id} 收到 TradingView 平倉訊號，但倉位 {current_position.id} "
+                                        f"tv_signal_close_enabled=False，跳過關倉"
                                     )
-                                    
-                                    # 使用統一的函數取得 exit_price（優先使用 avgPrice）
-                                    exit_price = get_exit_price_from_order(close_order, symbol)
-                                    
-                                    current_position.status = "CLOSED"
-                                    current_position.closed_at = datetime.now(timezone.utc)
-                                    current_position.exit_price = exit_price
-                                    current_position.exit_reason = "tv_exit"
-                                    db.commit()
-                                    
-                                    results.append(f"bot={bot.id}, closed_position_id={current_position.id}")
-                                    logger.info(f"Bot {bot.id} 成功平倉 Position {current_position.id}")
-                                except Exception as e:
-                                    error_msg = f"bot={bot.id}, error=close_failed: {str(e)}"
-                                    logger.exception(f"Bot {bot.id} 平倉失敗: {e}")
-                                    results.append(error_msg)
+                                else:
+                                    try:
+                                        close_order = close_futures_position(
+                                            symbol=symbol,
+                                            position_side=current_position.side,
+                                            qty=current_position.qty,
+                                            position_id=current_position.id
+                                        )
+                                        
+                                        # 使用統一的函數取得 exit_price（優先使用 avgPrice）
+                                        exit_price = get_exit_price_from_order(close_order, symbol)
+                                        
+                                        current_position.status = "CLOSED"
+                                        current_position.closed_at = datetime.now(timezone.utc)
+                                        current_position.exit_price = exit_price
+                                        current_position.exit_reason = "tv_exit"
+                                        db.commit()
+                                        
+                                        results.append(f"bot={bot.id}, closed_position_id={current_position.id}")
+                                        logger.info(f"Bot {bot.id} 成功平倉 Position {current_position.id}")
+                                    except Exception as e:
+                                        error_msg = f"bot={bot.id}, error=close_failed: {str(e)}"
+                                        logger.exception(f"Bot {bot.id} 平倉失敗: {e}")
+                                        results.append(error_msg)
                     
                     # Case B: 目標為多倉 (target > 0)
                     elif target_position_size > 0:
@@ -4935,6 +4955,18 @@ class PositionStopConfigUpdate(BaseModel):
     clear_overrides: bool = Field(False, description="如果為 true，清除所有覆寫值（設為 null）")
 
 
+class PositionMechanismConfigUpdate(BaseModel):
+    """更新倉位停損/止盈機制啟用狀態的請求格式"""
+    bot_stop_loss_enabled: Optional[bool] = Field(None, description="是否啟用 Bot 內建的停損機制（dynamic stop / base stop）")
+    tv_signal_close_enabled: Optional[bool] = Field(None, description="是否啟用 TradingView 訊號關倉機制（position_size=0）")
+
+
+class PositionMechanismConfigUpdate(BaseModel):
+    """更新倉位停損/止盈機制啟用狀態的請求格式"""
+    bot_stop_loss_enabled: Optional[bool] = Field(None, description="是否啟用 Bot 內建的停損機制（dynamic stop / base stop）")
+    tv_signal_close_enabled: Optional[bool] = Field(None, description="是否啟用 TradingView 訊號關倉機制（position_size=0）")
+
+
 @app.patch("/positions/{pos_id}/stop-config", response_model=PositionOut)
 async def update_position_stop_config(
     pos_id: int,
@@ -5071,6 +5103,79 @@ async def update_position_stop_config(
     })
     
     # 使用 from_orm 或 model_validate 返回 PositionOut
+    return PositionOut(**pos_dict)
+
+
+@app.patch("/positions/{pos_id}/mechanism-config", response_model=PositionOut)
+async def update_position_mechanism_config(
+    pos_id: int,
+    update: PositionMechanismConfigUpdate,
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    更新倉位的停損/止盈機制啟用狀態
+    
+    允許為每筆倉位獨立控制兩種停損/止盈機制：
+    - bot_stop_loss_enabled: Bot 內建的停損機制（dynamic stop / base stop）
+    - tv_signal_close_enabled: TradingView 訊號關倉機制（position_size=0）
+    
+    預設值都是 True（兩種機制都啟用）。
+    可以設定為 False 來停用特定機制。
+    
+    範例：
+    - bot_stop_loss_enabled=True, tv_signal_close_enabled=False: 只使用 Bot 停損，忽略 TradingView 關倉訊號
+    - bot_stop_loss_enabled=False, tv_signal_close_enabled=True: 只使用 TradingView 關倉訊號，不使用 Bot 停損
+    - bot_stop_loss_enabled=True, tv_signal_close_enabled=True: 兩種機制都啟用（預設）
+    
+    Args:
+        pos_id: 倉位 ID
+        update: 更新請求
+        user: 管理員使用者資訊
+        db: 資料庫 Session
+    
+    Returns:
+        PositionOut: 更新後的倉位資訊
+    
+    Raises:
+        HTTPException: 當倉位不存在時
+    """
+    position = db.query(Position).filter(Position.id == pos_id).first()
+    if not position:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    if position.status != "OPEN":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"只能更新 OPEN 狀態的倉位，當前狀態: {position.status}"
+        )
+    
+    # 更新標誌
+    if update.bot_stop_loss_enabled is not None:
+        position.bot_stop_loss_enabled = update.bot_stop_loss_enabled
+        logger.info(
+            f"倉位 {position.id} ({position.symbol}) bot_stop_loss_enabled "
+            f"已更新為 {update.bot_stop_loss_enabled}"
+        )
+    
+    if update.tv_signal_close_enabled is not None:
+        position.tv_signal_close_enabled = update.tv_signal_close_enabled
+        logger.info(
+            f"倉位 {position.id} ({position.symbol}) tv_signal_close_enabled "
+            f"已更新為 {update.tv_signal_close_enabled}"
+        )
+    
+    db.commit()
+    db.refresh(position)
+    
+    logger.info(
+        f"倉位 {position.id} ({position.symbol}) 機制配置已更新："
+        f"bot_stop_loss_enabled={position.bot_stop_loss_enabled}, "
+        f"tv_signal_close_enabled={position.tv_signal_close_enabled}"
+    )
+    
+    # 使用 to_dict() 然後轉換為 PositionOut，確保包含所有欄位
+    pos_dict = position.to_dict()
     return PositionOut(**pos_dict)
 
 

@@ -58,6 +58,12 @@ class Position(Base):
     dyn_profit_threshold_pct = Column(Float, nullable=True, comment="每筆倉位覆寫的獲利門檻百分比（例如 1.0 表示 1%），NULL 時使用全局配置")
     base_stop_loss_pct = Column(Float, nullable=True, comment="每筆倉位覆寫的基礎停損百分比（例如 0.5 表示 0.5%），NULL 時使用全局配置")
     
+    # 停損/止盈機制控制
+    # bot_stop_loss_enabled: 是否啟用 Bot 內建的停損機制（dynamic stop / base stop）
+    # tv_signal_close_enabled: 是否啟用 TradingView 訊號關倉機制（position_size=0）
+    bot_stop_loss_enabled = Column(Boolean, default=True, nullable=False, comment="是否啟用 Bot 內建的停損機制（dynamic stop / base stop）")
+    tv_signal_close_enabled = Column(Boolean, default=True, nullable=False, comment="是否啟用 TradingView 訊號關倉機制（position_size=0）")
+    
     # 平倉資訊
     exit_price = Column(Float, nullable=True, comment="平倉價格")
     exit_reason = Column(String(50), nullable=True, comment="平倉原因，例如 manual_close / trailing_stop / error")
@@ -98,6 +104,8 @@ class Position(Base):
             "tv_signal_log_id": self.tv_signal_log_id,
             "dyn_profit_threshold_pct": self.dyn_profit_threshold_pct,
             "base_stop_loss_pct": self.base_stop_loss_pct,
+            "bot_stop_loss_enabled": self.bot_stop_loss_enabled,
+            "tv_signal_close_enabled": self.tv_signal_close_enabled,
         }
 
 
