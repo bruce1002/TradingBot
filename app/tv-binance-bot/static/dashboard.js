@@ -278,6 +278,46 @@ function renderPositionsTable(data) {
       baseSlHtml = `<span class="${baseSlClass}">${baseSlHtml}</span>`;
     }
     
+    // Mechanism Controls (only for OPEN positions)
+    let mechanismHtml = "<span class='text-muted'>-</span>";
+    if (position.status === "OPEN") {
+      const botStopEnabled = position.bot_stop_loss_enabled !== false; // Default to true
+      const tvSignalEnabled = position.tv_signal_close_enabled !== false; // Default to true
+      
+      mechanismHtml = `
+        <div class="mechanism-controls">
+          <div class="mechanism-toggle">
+            <label class="toggle-label" title="Bot 內建停損機制（Dynamic Stop / Base Stop）">
+              <span class="toggle-text">Bot SL</span>
+              <div class="toggle-wrapper">
+                <input type="checkbox" 
+                       class="mechanism-checkbox" 
+                       data-position-id="${position.id}"
+                       data-mechanism="bot_stop_loss"
+                       ${botStopEnabled ? 'checked' : ''}
+                       onchange="updateMechanismConfig(${position.id}, 'bot_stop_loss_enabled', this.checked)">
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+          </div>
+          <div class="mechanism-toggle">
+            <label class="toggle-label" title="TradingView 訊號關倉機制（position_size=0）">
+              <span class="toggle-text">TV Close</span>
+              <div class="toggle-wrapper">
+                <input type="checkbox" 
+                       class="mechanism-checkbox" 
+                       data-position-id="${position.id}"
+                       data-mechanism="tv_signal_close"
+                       ${tvSignalEnabled ? 'checked' : ''}
+                       onchange="updateMechanismConfig(${position.id}, 'tv_signal_close_enabled', this.checked)">
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+          </div>
+        </div>
+      `;
+    }
+    
     // Actions 按鈕
     let actionsHtml = "<span class='text-muted'>-</span>";
     if (position.status === "OPEN") {
@@ -313,6 +353,7 @@ function renderPositionsTable(data) {
         <td class="text-right">${baseSlHtml}</td>
         <td class="text-center">${stopModeBadge}</td>
         <td class="text-right" style="font-size: 12px;">${stopPriceDisplay}</td>
+        <td class="text-center">${mechanismHtml}</td>
         <td>${fmtDateTime(position.created_at)}</td>
         <td>${fmtDateTime(position.closed_at)}</td>
         <td class="text-center">${actionsHtml}</td>
@@ -349,6 +390,7 @@ function renderPositionsTable(data) {
           <th class="text-right">Base SL%</th>
           <th class="text-center">Stop Mode</th>
           <th class="text-right">Stop Price</th>
+          <th class="text-center">Mechanisms</th>
           <th>Created At</th>
           <th>Closed At</th>
           <th class="text-center">Actions</th>
@@ -467,6 +509,59 @@ async function loadPositions() {
     if (isFirstLoad) {
       container.innerHTML = `<div class="empty-state">載入失敗: ${error.message}</div>`;
     }
+  }
+}
+
+// 更新機制配置
+async function updateMechanismConfig(positionId, mechanismField, enabled) {
+  // 取得觸發事件的 checkbox
+  const checkbox = document.querySelector(
+    `input[data-position-id="${positionId}"][data-mechanism="${mechanismField.replace('_enabled', '')}"]`
+  );
+  
+  if (!checkbox) {
+    console.error("找不到對應的 checkbox");
+    return;
+  }
+  
+  const originalChecked = checkbox.checked;
+  
+  // 暫時禁用 checkbox 防止重複點擊
+  checkbox.disabled = true;
+  
+  try {
+    const updateData = {};
+    updateData[mechanismField] = enabled;
+    
+    const response = await fetch(`/positions/${positionId}/mechanism-config`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(updateData),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || "更新失敗");
+    }
+    
+    const result = await response.json();
+    
+    // 顯示成功訊息（可選）
+    const mechanismName = mechanismField === "bot_stop_loss_enabled" ? "Bot 停損" : "TV 訊號關倉";
+    const statusText = enabled ? "啟用" : "停用";
+    console.log(`${mechanismName} 已${statusText}`);
+    
+    // 重新載入資料以更新顯示
+    await loadPositions();
+  } catch (error) {
+    console.error("更新機制配置失敗:", error);
+    alert(`更新失敗: ${error.message}`);
+    // 恢復 checkbox 狀態
+    checkbox.checked = !originalChecked;
+  } finally {
+    checkbox.disabled = false;
   }
 }
 

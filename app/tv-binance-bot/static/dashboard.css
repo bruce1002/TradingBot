@@ -491,6 +491,118 @@ body {
   cursor: not-allowed;
 }
 
+/* ==================== Mechanism Controls (Toggle Switches) ==================== */
+.mechanism-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  min-width: 120px;
+}
+
+.mechanism-toggle {
+  width: 100%;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--tbl-text);
+  gap: 8px;
+}
+
+.toggle-text {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+  color: var(--tbl-muted);
+}
+
+.toggle-label:hover .toggle-text {
+  color: var(--tbl-text);
+}
+
+/* Toggle Switch */
+.toggle-wrapper {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.mechanism-checkbox {
+  position: absolute;
+  width: 40px;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  background-color: var(--tbl-bg-alt);
+  border: 1px solid var(--tbl-border);
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 1;
+}
+
+.mechanism-checkbox:checked {
+  background-color: var(--tbl-positive);
+  border-color: var(--tbl-positive);
+}
+
+.mechanism-checkbox:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background-color: var(--tbl-text);
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.mechanism-checkbox:checked ~ .toggle-slider {
+  left: 22px;
+  background-color: var(--tbl-bg);
+}
+
+.mechanism-checkbox:disabled ~ .toggle-slider {
+  opacity: 0.5;
+}
+
+/* Tooltip for mechanism labels */
+.mechanism-toggle {
+  position: relative;
+}
+
+.toggle-label[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background-color: var(--tbl-header);
+  border: 1px solid var(--tbl-border);
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 1000;
+  margin-bottom: 4px;
+  color: var(--tbl-text);
+  pointer-events: none;
+}
+
 /* ==================== Symbol Link (TradingView) ==================== */
 .symbol-link {
   color: #7c8db5;
