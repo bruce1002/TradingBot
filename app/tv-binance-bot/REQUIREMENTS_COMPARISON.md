@@ -90,8 +90,8 @@
 | Dynamic stop price (SHORT) | ✅ `entry - (entry - best) * lock_ratio` | ✅ **MATCH** |
 | Dynamic trigger (LONG) | ✅ `mark <= stop_price` | ✅ **MATCH** |
 | Dynamic trigger (SHORT) | ✅ `mark >= stop_price` | ✅ **MATCH** |
-| Base stop price (LONG) | ✅ `entry - (margin * base_sl_pct/100) / qty` | ✅ **MATCH** |
-| Base stop price (SHORT) | ✅ `entry + (margin * base_sl_pct/100) / qty` | ✅ **MATCH** |
+| Base stop price (LONG) | ✅ `entry - (entry * base_sl_pct/100) / qty` | ✅ **MATCH** |
+| Base stop price (SHORT) | ✅ `entry + (entry * base_sl_pct/100) / qty` | ✅ **MATCH** |
 | Base trigger (LONG) | ✅ `mark <= stop_price` | ✅ **MATCH** |
 | Base trigger (SHORT) | ✅ `mark >= stop_price` | ✅ **MATCH** |
 
