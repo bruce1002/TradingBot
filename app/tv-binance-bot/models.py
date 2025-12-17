@@ -275,3 +275,45 @@ class BotConfig(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
+
+class PortfolioTrailingConfig(Base):
+    """
+    Portfolio Trailing Stop 配置模型
+    
+    存儲 Portfolio-level trailing stop 的持久化設定。
+    使用單例模式（只有一條記錄，id=1）。
+    """
+    
+    __tablename__ = "portfolio_trailing_config"
+    
+    # 主鍵（固定為 1，單例模式）
+    # 注意：不能使用 default=1，需要在創建時明確指定 id=1
+    id = Column(Integer, primary_key=True, comment="固定 ID（單例模式），應為 1")
+    
+    # 配置設定
+    enabled = Column(Boolean, default=False, nullable=False, comment="是否啟用自動賣出")
+    target_pnl = Column(Float, nullable=True, comment="目標 PnL（USDT），當達到此值時開始追蹤")
+    lock_ratio = Column(Float, nullable=True, comment="Lock ratio（0~1），如果 None 則使用全局 lock_ratio")
+    
+    # 運行時狀態（不持久化，每次重啟後重置）
+    # max_pnl_reached 和 last_check_time 仍然保存在內存中
+    
+    # 時間戳記
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="建立時間")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新時間")
+    
+    def __repr__(self):
+        """字串表示，方便除錯"""
+        return f"<PortfolioTrailingConfig(id={self.id}, enabled={self.enabled}, target_pnl={self.target_pnl}, lock_ratio={self.lock_ratio})>"
+    
+    def to_dict(self):
+        """將模型轉換為字典"""
+        return {
+            "id": self.id,
+            "enabled": self.enabled,
+            "target_pnl": self.target_pnl,
+            "lock_ratio": self.lock_ratio,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+

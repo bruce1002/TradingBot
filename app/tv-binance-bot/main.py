@@ -1518,22 +1518,39 @@ async def startup_event():
     try:
         config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
         if not config:
-            config = PortfolioTrailingConfig(
-                id=1,
-                enabled=False,
-                target_pnl=None,
-                lock_ratio=None
-            )
-            db.add(config)
-            db.commit()
-            logger.info("Portfolio Trailing Config 已初始化（預設值）")
+            try:
+                # 嘗試創建新記錄（明確指定 id=1）
+                config = PortfolioTrailingConfig(
+                    id=1,
+                    enabled=False,
+                    target_pnl=None,
+                    lock_ratio=None
+                )
+                db.add(config)
+                db.commit()
+                db.refresh(config)
+                logger.info("Portfolio Trailing Config 已初始化（預設值）")
+            except Exception as create_error:
+                # 如果創建失敗（可能是因為 id=1 已存在或其他原因），嘗試查詢
+                db.rollback()
+                config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+                if config:
+                    logger.info(f"Portfolio Trailing Config 已存在: enabled={config.enabled}, target_pnl={config.target_pnl}, lock_ratio={config.lock_ratio}")
+                else:
+                    logger.error(f"創建 Portfolio Trailing Config 失敗，且查詢也失敗: {create_error}")
         else:
             logger.info(f"Portfolio Trailing Config 已載入: enabled={config.enabled}, target_pnl={config.target_pnl}, lock_ratio={config.lock_ratio}")
     except Exception as e:
-        logger.error(f"初始化 Portfolio Trailing Config 時發生錯誤: {e}")
-        db.rollback()
+        logger.error(f"初始化 Portfolio Trailing Config 時發生錯誤: {e}", exc_info=True)
+        try:
+            db.rollback()
+        except:
+            pass
     finally:
-        db.close()
+        try:
+            db.close()
+        except:
+            pass
     
     # 嘗試初始化幣安客戶端（檢查環境變數是否設定）
     try:
