@@ -922,10 +922,72 @@ async function saveTrailingSettings() {
 
 // ==================== Binance Live Positions ====================
 
+// 載入 Portfolio Summary
+async function loadPortfolioSummary() {
+  try {
+    const response = await fetch("/binance/portfolio/summary");
+    if (await handleFetchError(response)) return;
+    
+    if (!response.ok) {
+      console.error("載入 Portfolio Summary 失敗:", response.status);
+      return;
+    }
+    
+    const data = await response.json();
+    
+    // 更新總 PnL
+    const totalPnlEl = document.getElementById("total-pnl");
+    if (totalPnlEl) {
+      const pnl = data.total_unrealized_pnl || 0;
+      totalPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
+      totalPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
+    }
+    
+    // 更新倉位數量
+    const positionCountEl = document.getElementById("position-count");
+    if (positionCountEl) {
+      positionCountEl.textContent = data.position_count || 0;
+    }
+    
+    // 更新 Max PnL Reached
+    const maxPnlEl = document.getElementById("max-pnl-reached");
+    if (maxPnlEl) {
+      const maxPnl = data.portfolio_trailing.max_pnl_reached;
+      if (maxPnl !== null && maxPnl !== undefined) {
+        maxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
+        maxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
+      } else {
+        maxPnlEl.textContent = "-";
+        maxPnlEl.style.color = "var(--text-primary, #fff)";
+      }
+    }
+    
+    // 更新 Portfolio Trailing 設定
+    const enabledCheckbox = document.getElementById("portfolio-trailing-enabled");
+    const targetPnlInput = document.getElementById("portfolio-target-pnl");
+    const lockRatioInput = document.getElementById("portfolio-lock-ratio");
+    
+    if (enabledCheckbox) {
+      enabledCheckbox.checked = data.portfolio_trailing.enabled || false;
+    }
+    if (targetPnlInput) {
+      targetPnlInput.value = data.portfolio_trailing.target_pnl || "";
+    }
+    if (lockRatioInput) {
+      lockRatioInput.value = data.portfolio_trailing.lock_ratio || "";
+    }
+  } catch (err) {
+    console.error("loadPortfolioSummary error:", err);
+  }
+}
+
 // 載入 Binance Live Positions
 async function loadBinancePositions() {
   const container = document.getElementById("binance-table-container");
   if (!container) return;
+  
+  // 同時載入 Portfolio Summary
+  await loadPortfolioSummary();
   
   // 檢查是否已有表格（避免首次載入時閃爍）
   const existingTable = container.querySelector("table");
@@ -1385,6 +1447,104 @@ async function saveBinanceStopConfig(symbol, side) {
 window.openBinanceStopConfigModal = openBinanceStopConfigModal;
 window.closeBinanceStopConfigModal = closeBinanceStopConfigModal;
 window.saveBinanceStopConfig = saveBinanceStopConfig;
+
+// 關閉所有 Binance Live Positions
+async function closeAllBinancePositions() {
+  if (!confirm("確定要關閉所有 Binance Live Positions 嗎？此操作無法撤銷。")) {
+    return;
+  }
+
+  const btn = document.getElementById("close-all-positions-btn");
+  if (btn) {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "關倉中...";
+    
+    try {
+      const resp = await fetch("/binance/positions/close-all", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (await handleFetchError(resp)) return;
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+
+      const result = await resp.json();
+      alert(`成功關閉 ${result.closed_count} 個倉位${result.errors && result.errors.length > 0 ? `\n錯誤: ${result.errors.join(", ")}` : ""}`);
+
+      // 重新載入 Binance positions 和 summary
+      await loadBinancePositions();
+      
+      // 也重新載入 Bot Positions（因為可能更新了現有倉位）
+      await loadPositions();
+    } catch (error) {
+      console.error("關閉所有 Binance Positions 失敗:", error);
+      alert(`關閉失敗：${error.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+  }
+}
+
+// 儲存 Portfolio Trailing 設定
+async function savePortfolioTrailingConfig() {
+  const enabledCheckbox = document.getElementById("portfolio-trailing-enabled");
+  const targetPnlInput = document.getElementById("portfolio-target-pnl");
+  const lockRatioInput = document.getElementById("portfolio-lock-ratio");
+  
+  if (!enabledCheckbox || !targetPnlInput || !lockRatioInput) {
+    alert("找不到設定欄位");
+    return;
+  }
+  
+  const payload = {
+    enabled: enabledCheckbox.checked,
+  };
+  
+  const targetPnlVal = targetPnlInput.value.trim();
+  if (targetPnlVal) {
+    payload.target_pnl = parseFloat(targetPnlVal);
+  }
+  
+  const lockRatioVal = lockRatioInput.value.trim();
+  if (lockRatioVal) {
+    payload.lock_ratio = parseFloat(lockRatioVal);
+  }
+  
+  try {
+    const resp = await fetch("/binance/portfolio/trailing", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    
+    if (await handleFetchError(resp)) return;
+    
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || "儲存失敗");
+    }
+    
+    alert("Portfolio Trailing 設定已更新！");
+    
+    // 重新載入 summary
+    await loadPortfolioSummary();
+  } catch (error) {
+    console.error("儲存 Portfolio Trailing 設定失敗:", error);
+    alert(`儲存失敗: ${error.message}`);
+  }
+}
 
 // 關閉 Binance Live Position
 async function closeBinancePosition(symbol, side) {
@@ -3895,6 +4055,17 @@ document.addEventListener("DOMContentLoaded", function() {
   const saveTrailingBtn = document.getElementById("save-trailing-settings");
   if (saveTrailingBtn) {
     saveTrailingBtn.addEventListener("click", saveTrailingSettings);
+  }
+  
+  // 設定 Portfolio Controls 按鈕
+  const closeAllBtn = document.getElementById("close-all-positions-btn");
+  if (closeAllBtn) {
+    closeAllBtn.addEventListener("click", closeAllBinancePositions);
+  }
+  
+  const savePortfolioTrailingBtn = document.getElementById("save-portfolio-trailing-btn");
+  if (savePortfolioTrailingBtn) {
+    savePortfolioTrailingBtn.addEventListener("click", savePortfolioTrailingConfig);
   }
   
   // 設定 Symbol 連結點擊事件（使用事件委派，因為表格會動態更新）

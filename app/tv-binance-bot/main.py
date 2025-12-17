@@ -96,6 +96,24 @@ _non_bot_position_tracking: dict[str, dict] = {}
 # 注意：這個映射只存在於記憶體中，應用重啟後會重置
 _binance_position_stop_overrides: dict[str, dict] = {}
 
+# ==================== Binance Portfolio Trailing Stop 狀態 ====================
+# 用於存儲 Portfolio-level trailing stop 的狀態
+# {
+#   "enabled": bool,                    # 是否啟用 auto-sell
+#   "target_pnl": float | None,         # 目標 PnL（觸發追蹤的門檻）
+#   "lock_ratio": float | None,         # Lock ratio（如果 None，使用全局 lock_ratio）
+#   "max_pnl_reached": float | None,    # 已達到的最大 PnL（當達到 target_pnl 時記錄）
+#   "last_check_time": float | None     # 最後檢查時間（timestamp）
+# }
+# 注意：這個狀態只存在於記憶體中，應用重啟後會重置
+_portfolio_trailing_state: dict = {
+    "enabled": False,
+    "target_pnl": None,
+    "lock_ratio": None,
+    "max_pnl_reached": None,
+    "last_check_time": None
+}
+
 # ==================== 風控設定 ====================
 # 允許交易的交易對列表
 ALLOWED_SYMBOLS = {"BTCUSDT", "ETHUSDT"}
@@ -217,6 +235,13 @@ async def trailing_stop_worker():
                 await check_binance_non_bot_positions(db)
             except Exception as e:
                 logger.error(f"檢查 Binance 非 bot 創建倉位時發生錯誤: {e}")
+                # 繼續執行，不要因為這個錯誤而停止整個任務
+            
+            # 檢查 Portfolio Trailing Stop
+            try:
+                await check_portfolio_trailing_stop(db)
+            except Exception as e:
+                logger.error(f"檢查 Portfolio Trailing Stop 時發生錯誤: {e}")
                 # 繼續執行，不要因為這個錯誤而停止整個任務
         
         except Exception as e:
@@ -466,6 +491,140 @@ async def check_binance_non_bot_positions(db: Session):
     except Exception as e:
         logger.error(f"檢查 Binance 非 bot 創建倉位時發生錯誤: {e}")
         # 不要拋出異常，讓主循環繼續運行
+
+
+async def check_portfolio_trailing_stop(db: Session):
+    """
+    檢查 Portfolio-level Trailing Stop
+    
+    邏輯：
+    1. 計算所有 Binance Live Positions 的總 PnL
+    2. 如果 enabled=True 且 target_pnl 已設定：
+       - 如果總 PnL >= target_pnl 且 max_pnl_reached 為 None，記錄 max_pnl_reached
+       - 如果總 PnL >= target_pnl，更新 max_pnl_reached（只增不減）
+       - 如果 max_pnl_reached 已記錄，計算 sell_threshold = max_pnl_reached * lock_ratio
+       - 如果總 PnL <= sell_threshold，觸發自動賣出所有倉位
+    """
+    global _portfolio_trailing_state
+    
+    # 檢查是否啟用
+    if not _portfolio_trailing_state.get("enabled", False):
+        return
+    
+    target_pnl = _portfolio_trailing_state.get("target_pnl")
+    if target_pnl is None:
+        return
+    
+    try:
+        client = get_client()
+        raw_positions = client.futures_position_information()
+        
+        # 計算總 PnL
+        total_pnl = 0.0
+        for item in raw_positions:
+            try:
+                position_amt = float(item.get("positionAmt", "0") or 0)
+            except (ValueError, TypeError):
+                continue
+            
+            if position_amt == 0:
+                continue
+            
+            try:
+                unrealized_pnl = float(item.get("unRealizedProfit", "0") or 0)
+                total_pnl += unrealized_pnl
+            except (ValueError, TypeError):
+                continue
+        
+        max_pnl_reached = _portfolio_trailing_state.get("max_pnl_reached")
+        
+        # 如果達到目標，記錄或更新 max_pnl_reached
+        if total_pnl >= target_pnl:
+            if max_pnl_reached is None or total_pnl > max_pnl_reached:
+                _portfolio_trailing_state["max_pnl_reached"] = total_pnl
+                max_pnl_reached = total_pnl
+                logger.info(
+                    f"[Portfolio Trailing] 總 PnL 達到目標 {target_pnl}，記錄最大 PnL: {max_pnl_reached}"
+                )
+        
+        # 如果已記錄 max_pnl_reached，檢查是否需要賣出
+        if max_pnl_reached is not None:
+            # 取得有效的 lock_ratio（portfolio 設定優先，否則使用全局）
+            lock_ratio = _portfolio_trailing_state.get("lock_ratio")
+            if lock_ratio is None:
+                lock_ratio = TRAILING_CONFIG.lock_ratio if TRAILING_CONFIG.lock_ratio is not None else DYN_LOCK_RATIO_DEFAULT
+            
+            # 計算賣出門檻
+            sell_threshold = max_pnl_reached * lock_ratio
+            
+            if total_pnl <= sell_threshold:
+                logger.warning(
+                    f"[Portfolio Trailing] 總 PnL ({total_pnl:.2f}) 已降至賣出門檻 ({sell_threshold:.2f} = "
+                    f"{max_pnl_reached:.2f} × {lock_ratio})，開始關閉所有倉位"
+                )
+                
+                # 關閉所有倉位
+                closed_count = 0
+                errors = []
+                
+                for item in raw_positions:
+                    try:
+                        position_amt = float(item.get("positionAmt", "0") or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    
+                    if position_amt == 0:
+                        continue
+                    
+                    symbol = item.get("symbol", "")
+                    if not symbol:
+                        continue
+                    
+                    position_side = "LONG" if position_amt > 0 else "SHORT"
+                    
+                    try:
+                        side = "SELL" if position_side == "LONG" else "BUY"
+                        qty = abs(position_amt)
+                        
+                        timestamp = int(time.time() * 1000)
+                        client_order_id = f"TVBOT_PORTFOLIO_TRAILING_{timestamp}_{closed_count}"
+                        
+                        logger.info(f"[Portfolio Trailing] 關閉 {symbol} {position_side}，數量: {qty}")
+                        
+                        order = client.futures_create_order(
+                            symbol=symbol,
+                            side=side,
+                            type="MARKET",
+                            quantity=qty,
+                            reduceOnly=True,
+                            newClientOrderId=client_order_id
+                        )
+                        
+                        closed_count += 1
+                        logger.info(
+                            f"[Portfolio Trailing] 成功關閉 {symbol} {position_side}，"
+                            f"訂單ID: {order.get('orderId')}"
+                        )
+                    except Exception as e:
+                        error_msg = f"{symbol} {position_side}: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(f"[Portfolio Trailing] 關閉 {symbol} {position_side} 失敗: {e}")
+                
+                # 重置 max_pnl_reached（所有倉位已關閉）
+                _portfolio_trailing_state["max_pnl_reached"] = None
+                
+                logger.info(
+                    f"[Portfolio Trailing] 自動賣出完成：關閉 {closed_count} 個倉位，"
+                    f"錯誤: {len(errors)}"
+                )
+                if errors:
+                    logger.error(f"[Portfolio Trailing] 關閉倉位時的錯誤: {errors}")
+        
+        # 更新最後檢查時間
+        _portfolio_trailing_state["last_check_time"] = time.time()
+        
+    except Exception as e:
+        logger.error(f"[Portfolio Trailing] 檢查時發生錯誤: {e}", exc_info=True)
 
 
 def get_exit_price_from_order(close_order: dict, symbol: str) -> float:
@@ -5278,6 +5437,21 @@ class BinancePositionStopConfigUpdate(BaseModel):
     clear_overrides: bool = Field(False, description="如果為 true，清除所有覆寫值（設為 null）")
 
 
+class PortfolioTrailingConfig(BaseModel):
+    """Portfolio Trailing Stop 設定模型"""
+    enabled: bool = Field(False, description="是否啟用自動賣出")
+    target_pnl: Optional[float] = Field(None, description="目標 PnL（USDT），當達到此值時開始追蹤")
+    lock_ratio: Optional[float] = Field(None, description="Lock ratio（0~1），如果 None 則使用全局 lock_ratio")
+    max_pnl_reached: Optional[float] = Field(None, description="已達到的最大 PnL（只讀）")
+
+
+class PortfolioTrailingConfigUpdate(BaseModel):
+    """更新 Portfolio Trailing Stop 設定的請求格式"""
+    enabled: Optional[bool] = None
+    target_pnl: Optional[float] = None
+    lock_ratio: Optional[float] = None
+
+
 @app.patch("/binance/positions/stop-config", response_model=dict)
 async def update_binance_position_stop_config(
     update: BinancePositionStopConfigUpdate,
@@ -5438,6 +5612,243 @@ async def update_binance_position_stop_config(
         "base_sl_value": base_sl_value,
         "base_sl_source": base_sl_source,
     }
+
+
+@app.get("/binance/portfolio/summary")
+async def get_binance_portfolio_summary(
+    user: dict = Depends(require_admin_user)
+):
+    """
+    取得 Binance Live Positions 的 Portfolio 摘要（總 PnL）。
+    僅限已登入的管理員使用。
+    
+    Returns:
+        dict: {
+            "total_unrealized_pnl": float,  # 總未實現盈虧（USDT）
+            "position_count": int,          # 倉位數量
+            "portfolio_trailing": {         # Portfolio trailing 狀態
+                "enabled": bool,
+                "target_pnl": float | None,
+                "lock_ratio": float | None,
+                "max_pnl_reached": float | None
+            }
+        }
+    
+    Raises:
+        HTTPException: 當 Binance API 呼叫失敗時
+    """
+    global _portfolio_trailing_state
+    
+    try:
+        client = get_client()
+        raw_positions = client.futures_position_information()
+        
+        total_pnl = 0.0
+        position_count = 0
+        
+        for item in raw_positions:
+            try:
+                position_amt = float(item.get("positionAmt", "0") or 0)
+            except (ValueError, TypeError):
+                position_amt = 0.0
+            
+            if position_amt == 0:
+                continue
+            
+            try:
+                unrealized_pnl = float(item.get("unRealizedProfit", "0") or 0)
+                total_pnl += unrealized_pnl
+                position_count += 1
+            except (ValueError, TypeError):
+                continue
+        
+        # 使用全局 lock_ratio 如果 portfolio lock_ratio 為 None
+        effective_lock_ratio = _portfolio_trailing_state.get("lock_ratio")
+        if effective_lock_ratio is None:
+            effective_lock_ratio = TRAILING_CONFIG.lock_ratio
+        
+        return {
+            "total_unrealized_pnl": total_pnl,
+            "position_count": position_count,
+            "portfolio_trailing": {
+                "enabled": _portfolio_trailing_state.get("enabled", False),
+                "target_pnl": _portfolio_trailing_state.get("target_pnl"),
+                "lock_ratio": _portfolio_trailing_state.get("lock_ratio"),
+                "max_pnl_reached": _portfolio_trailing_state.get("max_pnl_reached"),
+                "effective_lock_ratio": effective_lock_ratio
+            }
+        }
+    except Exception as e:
+        logger.exception("取得 Portfolio Summary 失敗")
+        raise HTTPException(
+            status_code=500,
+            detail=f"取得 Portfolio Summary 失敗: {str(e)}"
+        )
+
+
+@app.post("/binance/positions/close-all")
+async def close_all_binance_positions(
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    關閉所有 Binance Live Positions。
+    僅限已登入的管理員使用。
+    
+    Returns:
+        dict: {
+            "success": bool,
+            "closed_count": int,
+            "errors": List[str]
+        }
+    
+    Raises:
+        HTTPException: 當 Binance API 呼叫失敗時
+    """
+    try:
+        client = get_client()
+        raw_positions = client.futures_position_information()
+        
+        closed_count = 0
+        errors = []
+        
+        for item in raw_positions:
+            try:
+                position_amt = float(item.get("positionAmt", "0") or 0)
+            except (ValueError, TypeError):
+                continue
+            
+            if position_amt == 0:
+                continue
+            
+            symbol = item.get("symbol", "")
+            if not symbol:
+                continue
+            
+            position_side = "LONG" if position_amt > 0 else "SHORT"
+            
+            try:
+                # 使用現有的關倉邏輯
+                side = "SELL" if position_side == "LONG" else "BUY"
+                qty = abs(position_amt)
+                
+                timestamp = int(time.time() * 1000)
+                client_order_id = f"TVBOT_CLOSE_ALL_{timestamp}_{closed_count}"
+                
+                logger.info(f"關閉所有倉位: {symbol} {position_side}，數量: {qty}")
+                
+                order = client.futures_create_order(
+                    symbol=symbol,
+                    side=side,
+                    type="MARKET",
+                    quantity=qty,
+                    reduceOnly=True,
+                    newClientOrderId=client_order_id
+                )
+                
+                closed_count += 1
+                logger.info(f"成功關閉 {symbol} {position_side}，訂單ID: {order.get('orderId')}")
+            except Exception as e:
+                error_msg = f"{symbol} {position_side}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"關閉 {symbol} {position_side} 失敗: {e}")
+        
+        return {
+            "success": len(errors) == 0,
+            "closed_count": closed_count,
+            "errors": errors
+        }
+    except Exception as e:
+        logger.exception("關閉所有倉位失敗")
+        raise HTTPException(
+            status_code=500,
+            detail=f"關閉所有倉位失敗: {str(e)}"
+        )
+
+
+@app.get("/binance/portfolio/trailing", response_model=PortfolioTrailingConfig)
+async def get_portfolio_trailing_config(
+    user: dict = Depends(require_admin_user)
+):
+    """
+    取得 Portfolio Trailing Stop 設定。
+    僅限已登入的管理員使用。
+    
+    Returns:
+        PortfolioTrailingConfig: 目前的 Portfolio Trailing 設定
+    """
+    global _portfolio_trailing_state
+    return PortfolioTrailingConfig(
+        enabled=_portfolio_trailing_state.get("enabled", False),
+        target_pnl=_portfolio_trailing_state.get("target_pnl"),
+        lock_ratio=_portfolio_trailing_state.get("lock_ratio"),
+        max_pnl_reached=_portfolio_trailing_state.get("max_pnl_reached")
+    )
+
+
+@app.post("/binance/portfolio/trailing", response_model=PortfolioTrailingConfig)
+async def update_portfolio_trailing_config(
+    payload: PortfolioTrailingConfigUpdate,
+    user: dict = Depends(require_admin_user)
+):
+    """
+    更新 Portfolio Trailing Stop 設定。
+    僅限已登入的管理員使用。
+    
+    Args:
+        payload: 要更新的設定（只更新提供的欄位）
+        user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+    
+    Returns:
+        PortfolioTrailingConfig: 更新後的 Portfolio Trailing 設定
+    
+    Raises:
+        HTTPException: 當設定值無效時
+    """
+    global _portfolio_trailing_state
+    
+    if hasattr(payload, 'model_dump'):
+        data = payload.model_dump(exclude_unset=True)
+    else:
+        data = payload.dict(exclude_unset=True)
+    
+    # 範圍防呆
+    if "lock_ratio" in data and data["lock_ratio"] is not None:
+        if data["lock_ratio"] < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="lock_ratio 不能小於 0"
+            )
+        if data["lock_ratio"] > 1:
+            logger.warning(f"lock_ratio > 1（值={data['lock_ratio']}），已強制調整為 1.0")
+            data["lock_ratio"] = 1.0
+    
+    # 更新設定
+    if "enabled" in data:
+        _portfolio_trailing_state["enabled"] = data["enabled"]
+        # 如果停用，重置 max_pnl_reached
+        if not data["enabled"]:
+            _portfolio_trailing_state["max_pnl_reached"] = None
+    
+    if "target_pnl" in data:
+        _portfolio_trailing_state["target_pnl"] = data["target_pnl"]
+        # 如果更新 target_pnl，重置 max_pnl_reached（需要重新達到目標）
+        if data["target_pnl"] is not None:
+            _portfolio_trailing_state["max_pnl_reached"] = None
+    
+    if "lock_ratio" in data:
+        _portfolio_trailing_state["lock_ratio"] = data["lock_ratio"]
+    
+    logger.info(f"更新 Portfolio Trailing 設定: enabled={_portfolio_trailing_state.get('enabled')}, "
+                f"target_pnl={_portfolio_trailing_state.get('target_pnl')}, "
+                f"lock_ratio={_portfolio_trailing_state.get('lock_ratio')}")
+    
+    return PortfolioTrailingConfig(
+        enabled=_portfolio_trailing_state.get("enabled", False),
+        target_pnl=_portfolio_trailing_state.get("target_pnl"),
+        lock_ratio=_portfolio_trailing_state.get("lock_ratio"),
+        max_pnl_reached=_portfolio_trailing_state.get("max_pnl_reached")
+    )
 
 
 @app.delete("/positions/{pos_id}", response_model=dict)

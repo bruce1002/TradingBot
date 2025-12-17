@@ -129,6 +129,51 @@
 
             <!-- Binance Live Positions -->
             <div id="binance-positions-container" class="positions-container">
+                <!-- Portfolio Summary and Controls -->
+                <div class="portfolio-controls" style="margin-bottom: 20px; padding: 20px; background: var(--card-bg, #1e1e1e); border-radius: 8px; border: 1px solid var(--border-color, #333);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3 style="margin: 0; color: var(--text-primary, #fff);">Portfolio Summary</h3>
+                        <button id="close-all-positions-btn" class="btn-danger" style="padding: 8px 16px;">Close All Positions</button>
+                    </div>
+                    <div id="portfolio-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Total Unrealized PnL</div>
+                            <div id="total-pnl" style="font-size: 24px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                        </div>
+                        <div>
+                            <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Position Count</div>
+                            <div id="position-count" style="font-size: 24px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                        </div>
+                        <div>
+                            <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Max PnL Reached</div>
+                            <div id="max-pnl-reached" style="font-size: 24px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Portfolio Trailing Stop Controls -->
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color, #333);">
+                        <h4 style="margin: 0 0 15px 0; color: var(--text-primary, #fff);">Portfolio Trailing Stop</h4>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; align-items: end;">
+                            <label class="setting-item" style="display: flex; flex-direction: column;">
+                                <span>Enable Auto Sell:</span>
+                                <input type="checkbox" id="portfolio-trailing-enabled" style="width: auto; margin-top: 5px;">
+                            </label>
+                            <label class="setting-item" style="display: flex; flex-direction: column;">
+                                <span>Target PnL (USDT):</span>
+                                <input type="number" id="portfolio-target-pnl" step="0.01" min="0" class="setting-input" placeholder="e.g., 100">
+                            </label>
+                            <label class="setting-item" style="display: flex; flex-direction: column;">
+                                <span>Lock Ratio:</span>
+                                <input type="number" id="portfolio-lock-ratio" step="0.05" min="0" max="1" class="setting-input" placeholder="e.g., 0.65">
+                            </label>
+                            <button id="save-portfolio-trailing-btn" class="action-btn" style="padding: 10px 20px;">Save Config</button>
+                        </div>
+                        <div style="margin-top: 10px; color: var(--text-muted, #888); font-size: 12px;">
+                            <small>When total PnL reaches Target, max PnL is recorded. If PnL falls to (Max PnL × Lock Ratio), all positions will be closed automatically.</small>
+                        </div>
+                    </div>
+                </div>
+                
                 <div id="binance-table-container">
                     <!-- 載入中... -->
                     <div class="loading-state">
