@@ -4080,15 +4080,21 @@ async def get_trailing_settings(
 @app.post("/settings/trailing", response_model=TrailingConfig)
 async def update_trailing_settings(
     payload: TrailingConfigUpdate,
-    user: dict = Depends(require_admin_user)
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
 ):
     """
     更新 Trailing Stop 全域設定。
     僅限已登入的管理員使用。
     
+    當 lock_ratio 更新時，會自動更新所有 OPEN 狀態的倉位中，
+    原本使用舊的全局 lock_ratio 的倉位（trail_callback 等於舊值），
+    讓它們使用新的 lock_ratio。
+    
     Args:
         payload: 要更新的設定（只更新提供的欄位）
         user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+        db: 資料庫 Session
     
     Returns:
         TrailingConfig: 更新後的 Trailing 設定
@@ -4097,6 +4103,9 @@ async def update_trailing_settings(
         HTTPException: 當設定值無效時
     """
     global TRAILING_CONFIG
+    
+    # 保存舊的 lock_ratio 值（用於更新使用舊全局值的倉位）
+    old_lock_ratio = TRAILING_CONFIG.lock_ratio if TRAILING_CONFIG.lock_ratio is not None else None
     
     # 使用 dict() 方法（Pydantic v1/v2 兼容）
     if hasattr(TRAILING_CONFIG, 'model_dump'):
@@ -4140,7 +4149,50 @@ async def update_trailing_settings(
     
     # 更新設定
     updated.update(data)
+    new_lock_ratio = data.get("lock_ratio") if "lock_ratio" in data else None
     TRAILING_CONFIG = TrailingConfig(**updated)
+    
+    # 如果 lock_ratio 被更新，更新所有使用舊全局值的 OPEN 倉位
+    if "lock_ratio" in data and old_lock_ratio != new_lock_ratio:
+        try:
+            # 找出所有 OPEN 狀態且 trail_callback 等於舊全局 lock_ratio 的倉位
+            # 這些倉位原本是使用全局配置創建的，應該更新為新的全局值
+            if old_lock_ratio is not None:
+                # 舊值不是 None，找出所有等於舊值的倉位並更新
+                positions_to_update = (
+                    db.query(Position)
+                    .filter(
+                        Position.status == "OPEN",
+                        Position.trail_callback == old_lock_ratio
+                    )
+                    .all()
+                )
+            else:
+                # 舊值是 None，找出所有 trail_callback 為 None 的倉位並更新
+                # （雖然 None 的倉位會動態使用全局配置，但為了保持一致，也更新它們）
+                positions_to_update = (
+                    db.query(Position)
+                    .filter(
+                        Position.status == "OPEN",
+                        Position.trail_callback.is_(None)
+                    )
+                    .all()
+                )
+            
+            if positions_to_update:
+                for position in positions_to_update:
+                    position.trail_callback = new_lock_ratio
+                    logger.info(
+                        f"更新倉位 {position.id} ({position.symbol}) 的 lock_ratio: "
+                        f"{old_lock_ratio} -> {new_lock_ratio} (跟隨全局配置更新)"
+                    )
+                
+                db.commit()
+                logger.info(f"已更新 {len(positions_to_update)} 個 OPEN 倉位的 lock_ratio 以匹配新的全局配置")
+        except Exception as e:
+            logger.error(f"更新倉位的 lock_ratio 時發生錯誤: {e}", exc_info=True)
+            # 不影響全局配置的更新，只記錄錯誤
+            db.rollback()
     
     # 使用兼容的序列化方法
     if hasattr(TRAILING_CONFIG, 'model_dump_json'):
