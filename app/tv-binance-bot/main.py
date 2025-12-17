@@ -5673,18 +5673,39 @@ async def get_binance_portfolio_summary(
     global _portfolio_trailing_runtime_state
     
     # 從資料庫載入持久化配置
-    config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+    try:
+        config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+        if not config:
+            # 如果不存在，創建預設配置
+            try:
+                config = PortfolioTrailingConfig(
+                    id=1,
+                    enabled=False,
+                    target_pnl=None,
+                    lock_ratio=None
+                )
+                db.add(config)
+                db.commit()
+                db.refresh(config)
+            except Exception as create_error:
+                # 如果創建失敗，回滾並使用預設值
+                db.rollback()
+                logger.error(f"創建 Portfolio Trailing Config 失敗: {create_error}", exc_info=True)
+                # 使用內存中的預設值
+                config = None
+    except Exception as db_error:
+        logger.error(f"查詢 Portfolio Trailing Config 失敗: {db_error}", exc_info=True)
+        config = None
+    
+    # 如果無法從資料庫載入，使用預設值
     if not config:
-        # 如果不存在，創建預設配置
-        config = PortfolioTrailingConfig(
-            id=1,
-            enabled=False,
-            target_pnl=None,
-            lock_ratio=None
-        )
-        db.add(config)
-        db.commit()
-        db.refresh(config)
+        enabled = False
+        target_pnl = None
+        lock_ratio = None
+    else:
+        enabled = config.enabled
+        target_pnl = config.target_pnl
+        lock_ratio = config.lock_ratio
     
     try:
         client = get_client()
@@ -5710,17 +5731,17 @@ async def get_binance_portfolio_summary(
                 continue
         
         # 使用全局 lock_ratio 如果 portfolio lock_ratio 為 None
-        effective_lock_ratio = config.lock_ratio
+        effective_lock_ratio = lock_ratio
         if effective_lock_ratio is None:
-            effective_lock_ratio = TRAILING_CONFIG.lock_ratio
+            effective_lock_ratio = TRAILING_CONFIG.lock_ratio if TRAILING_CONFIG.lock_ratio is not None else DYN_LOCK_RATIO_DEFAULT
         
         return {
             "total_unrealized_pnl": total_pnl,
             "position_count": position_count,
             "portfolio_trailing": {
-                "enabled": config.enabled,
-                "target_pnl": config.target_pnl,
-                "lock_ratio": config.lock_ratio,
+                "enabled": enabled,
+                "target_pnl": target_pnl,
+                "lock_ratio": lock_ratio,
                 "max_pnl_reached": _portfolio_trailing_runtime_state.get("max_pnl_reached"),
                 "effective_lock_ratio": effective_lock_ratio
             }
@@ -5828,25 +5849,46 @@ async def get_portfolio_trailing_config(
     global _portfolio_trailing_runtime_state
     
     # 從資料庫載入配置
-    config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
-    if not config:
-        # 如果不存在，創建預設配置
-        config = PortfolioTrailingConfig(
-            id=1,
+    try:
+        config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+        if not config:
+            # 如果不存在，創建預設配置
+            try:
+                config = PortfolioTrailingConfig(
+                    id=1,
+                    enabled=False,
+                    target_pnl=None,
+                    lock_ratio=None
+                )
+                db.add(config)
+                db.commit()
+                db.refresh(config)
+            except Exception as create_error:
+                db.rollback()
+                logger.error(f"創建 Portfolio Trailing Config 失敗: {create_error}", exc_info=True)
+                # 返回預設值
+                return PortfolioTrailingConfig(
+                    enabled=False,
+                    target_pnl=None,
+                    lock_ratio=None,
+                    max_pnl_reached=_portfolio_trailing_runtime_state.get("max_pnl_reached")
+                )
+        
+        return PortfolioTrailingConfig(
+            enabled=config.enabled,
+            target_pnl=config.target_pnl,
+            lock_ratio=config.lock_ratio,
+            max_pnl_reached=_portfolio_trailing_runtime_state.get("max_pnl_reached")
+        )
+    except Exception as db_error:
+        logger.error(f"查詢 Portfolio Trailing Config 失敗: {db_error}", exc_info=True)
+        # 返回預設值而不是拋出異常
+        return PortfolioTrailingConfig(
             enabled=False,
             target_pnl=None,
-            lock_ratio=None
+            lock_ratio=None,
+            max_pnl_reached=_portfolio_trailing_runtime_state.get("max_pnl_reached")
         )
-        db.add(config)
-        db.commit()
-        db.refresh(config)
-    
-    return PortfolioTrailingConfig(
-        enabled=config.enabled,
-        target_pnl=config.target_pnl,
-        lock_ratio=config.lock_ratio,
-        max_pnl_reached=_portfolio_trailing_runtime_state.get("max_pnl_reached")
-    )
 
 
 @app.post("/binance/portfolio/trailing", response_model=PortfolioTrailingConfig)
@@ -5874,11 +5916,28 @@ async def update_portfolio_trailing_config(
     global _portfolio_trailing_runtime_state
     
     # 從資料庫載入或創建配置
-    config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
-    if not config:
-        config = PortfolioTrailingConfig(id=1, enabled=False, target_pnl=None, lock_ratio=None)
-        db.add(config)
-        db.flush()
+    try:
+        config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+        if not config:
+            try:
+                config = PortfolioTrailingConfig(id=1, enabled=False, target_pnl=None, lock_ratio=None)
+                db.add(config)
+                db.flush()
+            except Exception as create_error:
+                db.rollback()
+                logger.error(f"創建 Portfolio Trailing Config 失敗: {create_error}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"無法創建配置記錄: {str(create_error)}"
+                )
+    except HTTPException:
+        raise
+    except Exception as db_error:
+        logger.error(f"查詢 Portfolio Trailing Config 失敗: {db_error}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"資料庫錯誤: {str(db_error)}"
+        )
     
     if hasattr(payload, 'model_dump'):
         data = payload.model_dump(exclude_unset=True)
@@ -5913,11 +5972,18 @@ async def update_portfolio_trailing_config(
     if "lock_ratio" in data:
         config.lock_ratio = data["lock_ratio"]
     
-    db.commit()
-    db.refresh(config)
-    
-    logger.info(f"更新 Portfolio Trailing 設定（已持久化）: enabled={config.enabled}, "
-                f"target_pnl={config.target_pnl}, lock_ratio={config.lock_ratio}")
+    try:
+        db.commit()
+        db.refresh(config)
+        logger.info(f"更新 Portfolio Trailing 設定（已持久化）: enabled={config.enabled}, "
+                    f"target_pnl={config.target_pnl}, lock_ratio={config.lock_ratio}")
+    except Exception as commit_error:
+        db.rollback()
+        logger.error(f"提交 Portfolio Trailing 設定失敗: {commit_error}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"無法保存設定: {str(commit_error)}"
+        )
     
     return PortfolioTrailingConfig(
         enabled=config.enabled,

@@ -955,10 +955,19 @@ async function loadPortfolioSummary() {
     
     if (!response.ok) {
       console.error("載入 Portfolio Summary 失敗:", response.status);
+      // 顯示錯誤但不清空現有值
+      const errorText = await response.text().catch(() => "");
+      console.error("錯誤詳情:", errorText);
       return;
     }
     
     const data = await response.json();
+    
+    // 確保 data 和 data.portfolio_trailing 存在
+    if (!data || !data.portfolio_trailing) {
+      console.error("Portfolio Summary 資料格式錯誤:", data);
+      return;
+    }
     
     // 更新總 PnL
     const totalPnlEl = document.getElementById("total-pnl");
@@ -1579,7 +1588,8 @@ async function savePortfolioTrailingConfig() {
     
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || "儲存失敗");
+      const errorMsg = err.detail || err.message || `HTTP ${resp.status}`;
+      throw new Error(errorMsg);
     }
     
     alert("Portfolio Trailing 設定已更新！");
@@ -1588,7 +1598,8 @@ async function savePortfolioTrailingConfig() {
     await loadPortfolioSummary();
   } catch (error) {
     console.error("儲存 Portfolio Trailing 設定失敗:", error);
-    alert(`儲存失敗: ${error.message}`);
+    const errorMsg = error.message || String(error);
+    alert(`儲存失敗: ${errorMsg}`);
   }
 }
 
