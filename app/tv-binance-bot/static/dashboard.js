@@ -3981,9 +3981,11 @@ window.saveStopConfig = saveStopConfig;
 document.addEventListener("DOMContentLoaded", function() {
   // 先載入使用者資訊
   loadUserInfo();
-  
+
   // 載入倉位資料
   loadPositions();
+  // 載入 Portfolio Trailing Stop 設定（包括配置輸入欄位）- 必須在 loadBinancePositions 之前，確保配置先載入
+  loadPortfolioSummary();
   loadBinancePositions();
   loadSignals();
   loadSignalConfigs();  // 載入 Signal Configs
