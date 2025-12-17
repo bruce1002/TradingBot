@@ -5779,6 +5779,7 @@ async def close_all_binance_positions(
         
         closed_count = 0
         errors = []
+        db_positions_to_update = []  # 收集需要更新的 Position 記錄
         
         for item in raw_positions:
             try:
@@ -5814,16 +5815,84 @@ async def close_all_binance_positions(
                     newClientOrderId=client_order_id
                 )
                 
+                # 取得平倉價格
+                exit_price = get_exit_price_from_order(order, symbol)
+                
+                # 更新資料庫中的 Position 記錄（如果存在）
+                # 查找所有匹配的 OPEN 狀態 Position 記錄
+                matching_positions = (
+                    db.query(Position)
+                    .filter(
+                        Position.symbol == symbol.upper(),
+                        Position.side == position_side,
+                        Position.status == "OPEN"
+                    )
+                    .all()
+                )
+                
+                # 記錄需要更新的 Position 記錄和相關資訊
+                for db_position in matching_positions:
+                    db_positions_to_update.append({
+                        "position": db_position,
+                        "exit_price": exit_price,
+                        "order": order
+                    })
+                
                 closed_count += 1
-                logger.info(f"成功關閉 {symbol} {position_side}，訂單ID: {order.get('orderId')}")
+                logger.info(
+                    f"成功關閉 {symbol} {position_side}，訂單ID: {order.get('orderId')}，"
+                    f"找到 {len(matching_positions)} 筆需要更新的資料庫記錄"
+                )
             except Exception as e:
                 error_msg = f"{symbol} {position_side}: {str(e)}"
                 errors.append(error_msg)
                 logger.error(f"關閉 {symbol} {position_side} 失敗: {e}")
         
+        # 批量更新所有 Position 記錄
+        updated_count = 0
+        for update_info in db_positions_to_update:
+            try:
+                db_position = update_info["position"]
+                exit_price = update_info["exit_price"]
+                order = update_info["order"]
+                
+                db_position.status = "CLOSED"
+                db_position.closed_at = datetime.now(timezone.utc)
+                db_position.exit_price = exit_price
+                db_position.exit_reason = "manual_close_all"
+                # 更新訂單 ID（如果可用）
+                if order.get("orderId"):
+                    try:
+                        db_position.binance_order_id = int(order["orderId"])
+                    except (ValueError, TypeError):
+                        pass
+                if order.get("clientOrderId"):
+                    db_position.client_order_id = order["clientOrderId"]
+                
+                updated_count += 1
+                logger.info(
+                    f"已更新資料庫 Position 記錄 {db_position.id} ({db_position.symbol} {db_position.side}) 狀態為 CLOSED"
+                )
+            except Exception as db_update_error:
+                logger.error(
+                    f"更新資料庫 Position 記錄 {update_info['position'].id} 失敗: {db_update_error}"
+                )
+                # 繼續處理其他記錄，不影響整體流程
+        
+        # 提交所有資料庫變更
+        try:
+            if db_positions_to_update:
+                db.commit()
+                logger.info(f"成功更新 {updated_count} 筆 Position 記錄狀態為 CLOSED")
+        except Exception as commit_error:
+            logger.error(f"提交資料庫變更失敗: {commit_error}")
+            db.rollback()
+            errors.append(f"資料庫更新失敗: {str(commit_error)}")
+        
         return {
             "success": len(errors) == 0,
             "closed_count": closed_count,
+            "updated_db_records": updated_count,
             "errors": errors
         }
     except Exception as e:
