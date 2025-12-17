@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from db import init_db, get_db, SessionLocal
-from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig
+from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig, PortfolioTrailingConfig
 from binance_client import (
     get_client, 
     get_mark_price, 
@@ -97,19 +97,10 @@ _non_bot_position_tracking: dict[str, dict] = {}
 _binance_position_stop_overrides: dict[str, dict] = {}
 
 # ==================== Binance Portfolio Trailing Stop 狀態 ====================
-# 用於存儲 Portfolio-level trailing stop 的狀態
-# {
-#   "enabled": bool,                    # 是否啟用 auto-sell
-#   "target_pnl": float | None,         # 目標 PnL（觸發追蹤的門檻）
-#   "lock_ratio": float | None,         # Lock ratio（如果 None，使用全局 lock_ratio）
-#   "max_pnl_reached": float | None,    # 已達到的最大 PnL（當達到 target_pnl 時記錄）
-#   "last_check_time": float | None     # 最後檢查時間（timestamp）
-# }
-# 注意：這個狀態只存在於記憶體中，應用重啟後會重置
-_portfolio_trailing_state: dict = {
-    "enabled": False,
-    "target_pnl": None,
-    "lock_ratio": None,
+# 用於存儲 Portfolio-level trailing stop 的運行時狀態
+# 持久化配置（enabled, target_pnl, lock_ratio）存儲在資料庫中
+# 運行時狀態（max_pnl_reached, last_check_time）只存在於記憶體中，應用重啟後會重置
+_portfolio_trailing_runtime_state: dict = {
     "max_pnl_reached": None,
     "last_check_time": None
 }
@@ -505,13 +496,14 @@ async def check_portfolio_trailing_stop(db: Session):
        - 如果 max_pnl_reached 已記錄，計算 sell_threshold = max_pnl_reached * lock_ratio
        - 如果總 PnL <= sell_threshold，觸發自動賣出所有倉位
     """
-    global _portfolio_trailing_state
+    global _portfolio_trailing_runtime_state
     
-    # 檢查是否啟用
-    if not _portfolio_trailing_state.get("enabled", False):
+    # 從資料庫載入配置
+    config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+    if not config or not config.enabled:
         return
     
-    target_pnl = _portfolio_trailing_state.get("target_pnl")
+    target_pnl = config.target_pnl
     if target_pnl is None:
         return
     
@@ -536,12 +528,12 @@ async def check_portfolio_trailing_stop(db: Session):
             except (ValueError, TypeError):
                 continue
         
-        max_pnl_reached = _portfolio_trailing_state.get("max_pnl_reached")
+        max_pnl_reached = _portfolio_trailing_runtime_state.get("max_pnl_reached")
         
         # 如果達到目標，記錄或更新 max_pnl_reached
         if total_pnl >= target_pnl:
             if max_pnl_reached is None or total_pnl > max_pnl_reached:
-                _portfolio_trailing_state["max_pnl_reached"] = total_pnl
+                _portfolio_trailing_runtime_state["max_pnl_reached"] = total_pnl
                 max_pnl_reached = total_pnl
                 logger.info(
                     f"[Portfolio Trailing] 總 PnL 達到目標 {target_pnl}，記錄最大 PnL: {max_pnl_reached}"
@@ -550,7 +542,7 @@ async def check_portfolio_trailing_stop(db: Session):
         # 如果已記錄 max_pnl_reached，檢查是否需要賣出
         if max_pnl_reached is not None:
             # 取得有效的 lock_ratio（portfolio 設定優先，否則使用全局）
-            lock_ratio = _portfolio_trailing_state.get("lock_ratio")
+            lock_ratio = config.lock_ratio
             if lock_ratio is None:
                 lock_ratio = TRAILING_CONFIG.lock_ratio if TRAILING_CONFIG.lock_ratio is not None else DYN_LOCK_RATIO_DEFAULT
             
@@ -611,7 +603,7 @@ async def check_portfolio_trailing_stop(db: Session):
                         logger.error(f"[Portfolio Trailing] 關閉 {symbol} {position_side} 失敗: {e}")
                 
                 # 重置 max_pnl_reached（所有倉位已關閉）
-                _portfolio_trailing_state["max_pnl_reached"] = None
+                _portfolio_trailing_runtime_state["max_pnl_reached"] = None
                 
                 logger.info(
                     f"[Portfolio Trailing] 自動賣出完成：關閉 {closed_count} 個倉位，"
@@ -621,7 +613,7 @@ async def check_portfolio_trailing_stop(db: Session):
                     logger.error(f"[Portfolio Trailing] 關閉倉位時的錯誤: {errors}")
         
         # 更新最後檢查時間
-        _portfolio_trailing_state["last_check_time"] = time.time()
+        _portfolio_trailing_runtime_state["last_check_time"] = time.time()
         
     except Exception as e:
         logger.error(f"[Portfolio Trailing] 檢查時發生錯誤: {e}", exc_info=True)
@@ -1520,6 +1512,29 @@ async def shutdown_event():
 async def startup_event():
     """應用程式啟動時執行"""
     init_db()
+    
+    # 初始化 Portfolio Trailing Config（如果不存在則創建預設值）
+    db = SessionLocal()
+    try:
+        config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+        if not config:
+            config = PortfolioTrailingConfig(
+                id=1,
+                enabled=False,
+                target_pnl=None,
+                lock_ratio=None
+            )
+            db.add(config)
+            db.commit()
+            logger.info("Portfolio Trailing Config 已初始化（預設值）")
+        else:
+            logger.info(f"Portfolio Trailing Config 已載入: enabled={config.enabled}, target_pnl={config.target_pnl}, lock_ratio={config.lock_ratio}")
+    except Exception as e:
+        logger.error(f"初始化 Portfolio Trailing Config 時發生錯誤: {e}")
+        db.rollback()
+    finally:
+        db.close()
+    
     # 嘗試初始化幣安客戶端（檢查環境變數是否設定）
     try:
         get_client()
@@ -5616,7 +5631,8 @@ async def update_binance_position_stop_config(
 
 @app.get("/binance/portfolio/summary")
 async def get_binance_portfolio_summary(
-    user: dict = Depends(require_admin_user)
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
 ):
     """
     取得 Binance Live Positions 的 Portfolio 摘要（總 PnL）。
@@ -5637,7 +5653,21 @@ async def get_binance_portfolio_summary(
     Raises:
         HTTPException: 當 Binance API 呼叫失敗時
     """
-    global _portfolio_trailing_state
+    global _portfolio_trailing_runtime_state
+    
+    # 從資料庫載入持久化配置
+    config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+    if not config:
+        # 如果不存在，創建預設配置
+        config = PortfolioTrailingConfig(
+            id=1,
+            enabled=False,
+            target_pnl=None,
+            lock_ratio=None
+        )
+        db.add(config)
+        db.commit()
+        db.refresh(config)
     
     try:
         client = get_client()
@@ -5663,7 +5693,7 @@ async def get_binance_portfolio_summary(
                 continue
         
         # 使用全局 lock_ratio 如果 portfolio lock_ratio 為 None
-        effective_lock_ratio = _portfolio_trailing_state.get("lock_ratio")
+        effective_lock_ratio = config.lock_ratio
         if effective_lock_ratio is None:
             effective_lock_ratio = TRAILING_CONFIG.lock_ratio
         
@@ -5671,10 +5701,10 @@ async def get_binance_portfolio_summary(
             "total_unrealized_pnl": total_pnl,
             "position_count": position_count,
             "portfolio_trailing": {
-                "enabled": _portfolio_trailing_state.get("enabled", False),
-                "target_pnl": _portfolio_trailing_state.get("target_pnl"),
-                "lock_ratio": _portfolio_trailing_state.get("lock_ratio"),
-                "max_pnl_reached": _portfolio_trailing_state.get("max_pnl_reached"),
+                "enabled": config.enabled,
+                "target_pnl": config.target_pnl,
+                "lock_ratio": config.lock_ratio,
+                "max_pnl_reached": _portfolio_trailing_runtime_state.get("max_pnl_reached"),
                 "effective_lock_ratio": effective_lock_ratio
             }
         }
@@ -5768,7 +5798,8 @@ async def close_all_binance_positions(
 
 @app.get("/binance/portfolio/trailing", response_model=PortfolioTrailingConfig)
 async def get_portfolio_trailing_config(
-    user: dict = Depends(require_admin_user)
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
 ):
     """
     取得 Portfolio Trailing Stop 設定。
@@ -5777,27 +5808,45 @@ async def get_portfolio_trailing_config(
     Returns:
         PortfolioTrailingConfig: 目前的 Portfolio Trailing 設定
     """
-    global _portfolio_trailing_state
+    global _portfolio_trailing_runtime_state
+    
+    # 從資料庫載入配置
+    config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+    if not config:
+        # 如果不存在，創建預設配置
+        config = PortfolioTrailingConfig(
+            id=1,
+            enabled=False,
+            target_pnl=None,
+            lock_ratio=None
+        )
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+    
     return PortfolioTrailingConfig(
-        enabled=_portfolio_trailing_state.get("enabled", False),
-        target_pnl=_portfolio_trailing_state.get("target_pnl"),
-        lock_ratio=_portfolio_trailing_state.get("lock_ratio"),
-        max_pnl_reached=_portfolio_trailing_state.get("max_pnl_reached")
+        enabled=config.enabled,
+        target_pnl=config.target_pnl,
+        lock_ratio=config.lock_ratio,
+        max_pnl_reached=_portfolio_trailing_runtime_state.get("max_pnl_reached")
     )
 
 
 @app.post("/binance/portfolio/trailing", response_model=PortfolioTrailingConfig)
 async def update_portfolio_trailing_config(
     payload: PortfolioTrailingConfigUpdate,
-    user: dict = Depends(require_admin_user)
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
 ):
     """
     更新 Portfolio Trailing Stop 設定。
     僅限已登入的管理員使用。
+    設定會持久化到資料庫，即使系統重啟也會保留。
     
     Args:
         payload: 要更新的設定（只更新提供的欄位）
         user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+        db: 資料庫 Session
     
     Returns:
         PortfolioTrailingConfig: 更新後的 Portfolio Trailing 設定
@@ -5805,7 +5854,14 @@ async def update_portfolio_trailing_config(
     Raises:
         HTTPException: 當設定值無效時
     """
-    global _portfolio_trailing_state
+    global _portfolio_trailing_runtime_state
+    
+    # 從資料庫載入或創建配置
+    config = db.query(PortfolioTrailingConfig).filter(PortfolioTrailingConfig.id == 1).first()
+    if not config:
+        config = PortfolioTrailingConfig(id=1, enabled=False, target_pnl=None, lock_ratio=None)
+        db.add(config)
+        db.flush()
     
     if hasattr(payload, 'model_dump'):
         data = payload.model_dump(exclude_unset=True)
@@ -5823,31 +5879,34 @@ async def update_portfolio_trailing_config(
             logger.warning(f"lock_ratio > 1（值={data['lock_ratio']}），已強制調整為 1.0")
             data["lock_ratio"] = 1.0
     
-    # 更新設定
+    # 更新設定並保存到資料庫
     if "enabled" in data:
-        _portfolio_trailing_state["enabled"] = data["enabled"]
+        config.enabled = data["enabled"]
         # 如果停用，重置 max_pnl_reached
         if not data["enabled"]:
-            _portfolio_trailing_state["max_pnl_reached"] = None
+            _portfolio_trailing_runtime_state["max_pnl_reached"] = None
     
     if "target_pnl" in data:
-        _portfolio_trailing_state["target_pnl"] = data["target_pnl"]
+        old_target_pnl = config.target_pnl
+        config.target_pnl = data["target_pnl"]
         # 如果更新 target_pnl，重置 max_pnl_reached（需要重新達到目標）
-        if data["target_pnl"] is not None:
-            _portfolio_trailing_state["max_pnl_reached"] = None
+        if data["target_pnl"] is not None and data["target_pnl"] != old_target_pnl:
+            _portfolio_trailing_runtime_state["max_pnl_reached"] = None
     
     if "lock_ratio" in data:
-        _portfolio_trailing_state["lock_ratio"] = data["lock_ratio"]
+        config.lock_ratio = data["lock_ratio"]
     
-    logger.info(f"更新 Portfolio Trailing 設定: enabled={_portfolio_trailing_state.get('enabled')}, "
-                f"target_pnl={_portfolio_trailing_state.get('target_pnl')}, "
-                f"lock_ratio={_portfolio_trailing_state.get('lock_ratio')}")
+    db.commit()
+    db.refresh(config)
+    
+    logger.info(f"更新 Portfolio Trailing 設定（已持久化）: enabled={config.enabled}, "
+                f"target_pnl={config.target_pnl}, lock_ratio={config.lock_ratio}")
     
     return PortfolioTrailingConfig(
-        enabled=_portfolio_trailing_state.get("enabled", False),
-        target_pnl=_portfolio_trailing_state.get("target_pnl"),
-        lock_ratio=_portfolio_trailing_state.get("lock_ratio"),
-        max_pnl_reached=_portfolio_trailing_state.get("max_pnl_reached")
+        enabled=config.enabled,
+        target_pnl=config.target_pnl,
+        lock_ratio=config.lock_ratio,
+        max_pnl_reached=_portfolio_trailing_runtime_state.get("max_pnl_reached")
     )
 
 

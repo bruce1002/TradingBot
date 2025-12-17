@@ -988,18 +988,32 @@ async function loadPortfolioSummary() {
     }
     
     // 更新 Portfolio Trailing 設定
+    // 注意：只在用戶沒有正在編輯時才更新，避免覆蓋用戶正在輸入的值
     const enabledCheckbox = document.getElementById("portfolio-trailing-enabled");
     const targetPnlInput = document.getElementById("portfolio-target-pnl");
     const lockRatioInput = document.getElementById("portfolio-lock-ratio");
     
     if (enabledCheckbox) {
+      // Checkbox 可以安全更新（不會影響正在輸入）
       enabledCheckbox.checked = data.portfolio_trailing.enabled || false;
     }
+    
+    // 只更新沒有焦點的輸入欄位（用戶沒有正在編輯）
+    // 如果用戶正在輸入（欄位有焦點），保留用戶輸入的值
     if (targetPnlInput) {
-      targetPnlInput.value = data.portfolio_trailing.target_pnl || "";
+      const isFocused = document.activeElement === targetPnlInput;
+      if (!isFocused) {
+        // 只有當欄位沒有焦點時才更新（用戶沒有正在編輯）
+        targetPnlInput.value = data.portfolio_trailing.target_pnl ? String(data.portfolio_trailing.target_pnl) : "";
+      }
     }
+    
     if (lockRatioInput) {
-      lockRatioInput.value = data.portfolio_trailing.lock_ratio || "";
+      const isFocused = document.activeElement === lockRatioInput;
+      if (!isFocused) {
+        // 只有當欄位沒有焦點時才更新（用戶沒有正在編輯）
+        lockRatioInput.value = data.portfolio_trailing.lock_ratio ? String(data.portfolio_trailing.lock_ratio) : "";
+      }
     }
   } catch (err) {
     console.error("loadPortfolioSummary error:", err);
