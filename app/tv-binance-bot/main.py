@@ -5469,8 +5469,8 @@ class BinancePositionStopConfigUpdate(BaseModel):
     clear_overrides: bool = Field(False, description="如果為 true，清除所有覆寫值（設為 null）")
 
 
-class PortfolioTrailingConfig(BaseModel):
-    """Portfolio Trailing Stop 設定模型"""
+class PortfolioTrailingConfigOut(BaseModel):
+    """Portfolio Trailing Stop 設定模型（API 回應用）"""
     enabled: bool = Field(False, description="是否啟用自動賣出")
     target_pnl: Optional[float] = Field(None, description="目標 PnL（USDT），當達到此值時開始追蹤")
     lock_ratio: Optional[float] = Field(None, description="Lock ratio（0~1），如果 None 則使用全局 lock_ratio")
@@ -5834,7 +5834,7 @@ async def close_all_binance_positions(
         )
 
 
-@app.get("/binance/portfolio/trailing", response_model=PortfolioTrailingConfig)
+@app.get("/binance/portfolio/trailing", response_model=PortfolioTrailingConfigOut)
 async def get_portfolio_trailing_config(
     user: dict = Depends(require_admin_user),
     db: Session = Depends(get_db)
@@ -5844,7 +5844,7 @@ async def get_portfolio_trailing_config(
     僅限已登入的管理員使用。
     
     Returns:
-        PortfolioTrailingConfig: 目前的 Portfolio Trailing 設定
+        PortfolioTrailingConfigOut: 目前的 Portfolio Trailing 設定
     """
     global _portfolio_trailing_runtime_state
     
@@ -5867,14 +5867,14 @@ async def get_portfolio_trailing_config(
                 db.rollback()
                 logger.error(f"創建 Portfolio Trailing Config 失敗: {create_error}", exc_info=True)
                 # 返回預設值
-                return PortfolioTrailingConfig(
+                return PortfolioTrailingConfigOut(
                     enabled=False,
                     target_pnl=None,
                     lock_ratio=None,
                     max_pnl_reached=_portfolio_trailing_runtime_state.get("max_pnl_reached")
                 )
         
-        return PortfolioTrailingConfig(
+        return PortfolioTrailingConfigOut(
             enabled=config.enabled,
             target_pnl=config.target_pnl,
             lock_ratio=config.lock_ratio,
@@ -5883,7 +5883,7 @@ async def get_portfolio_trailing_config(
     except Exception as db_error:
         logger.error(f"查詢 Portfolio Trailing Config 失敗: {db_error}", exc_info=True)
         # 返回預設值而不是拋出異常
-        return PortfolioTrailingConfig(
+        return PortfolioTrailingConfigOut(
             enabled=False,
             target_pnl=None,
             lock_ratio=None,
@@ -5891,7 +5891,7 @@ async def get_portfolio_trailing_config(
         )
 
 
-@app.post("/binance/portfolio/trailing", response_model=PortfolioTrailingConfig)
+@app.post("/binance/portfolio/trailing", response_model=PortfolioTrailingConfigOut)
 async def update_portfolio_trailing_config(
     payload: PortfolioTrailingConfigUpdate,
     user: dict = Depends(require_admin_user),
@@ -5908,7 +5908,7 @@ async def update_portfolio_trailing_config(
         db: 資料庫 Session
     
     Returns:
-        PortfolioTrailingConfig: 更新後的 Portfolio Trailing 設定
+        PortfolioTrailingConfigOut: 更新後的 Portfolio Trailing 設定
     
     Raises:
         HTTPException: 當設定值無效時
@@ -5985,7 +5985,7 @@ async def update_portfolio_trailing_config(
             detail=f"無法保存設定: {str(commit_error)}"
         )
     
-    return PortfolioTrailingConfig(
+    return PortfolioTrailingConfigOut(
         enabled=config.enabled,
         target_pnl=config.target_pnl,
         lock_ratio=config.lock_ratio,

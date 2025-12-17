@@ -947,7 +947,62 @@ async function saveTrailingSettings() {
 
 // ==================== Binance Live Positions ====================
 
-// 載入 Portfolio Summary
+// 只更新 Portfolio Summary 的值（Total PnL, Position Count, Max PnL Reached）
+// 不會更新 Portfolio Trailing Stop 的配置輸入欄位
+async function loadPortfolioSummaryOnly() {
+  try {
+    const response = await fetch("/binance/portfolio/summary");
+    if (await handleFetchError(response)) return;
+    
+    if (!response.ok) {
+      console.error("載入 Portfolio Summary 失敗:", response.status);
+      return;
+    }
+    
+    const data = await response.json();
+    
+    // 確保 data 和 data.portfolio_trailing 存在
+    if (!data || !data.portfolio_trailing) {
+      console.error("Portfolio Summary 資料格式錯誤:", data);
+      return;
+    }
+    
+    // 更新總 PnL
+    const totalPnlEl = document.getElementById("total-pnl");
+    if (totalPnlEl) {
+      const pnl = data.total_unrealized_pnl || 0;
+      totalPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
+      totalPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
+    }
+    
+    // 更新倉位數量
+    const positionCountEl = document.getElementById("position-count");
+    if (positionCountEl) {
+      positionCountEl.textContent = data.position_count || 0;
+    }
+    
+    // 更新 Max PnL Reached
+    const maxPnlEl = document.getElementById("max-pnl-reached");
+    if (maxPnlEl) {
+      const maxPnl = data.portfolio_trailing.max_pnl_reached;
+      if (maxPnl !== null && maxPnl !== undefined) {
+        maxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
+        maxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
+      } else {
+        maxPnlEl.textContent = "-";
+        maxPnlEl.style.color = "var(--text-primary, #fff)";
+      }
+    }
+    
+    // 注意：這裡不更新 Portfolio Trailing Stop 的配置輸入欄位
+    // 讓用戶可以安心填寫配置而不會被自動刷新打斷
+  } catch (err) {
+    console.error("loadPortfolioSummaryOnly error:", err);
+  }
+}
+
+// 載入 Portfolio Summary（包括配置輸入欄位）
+// 用於完整載入，例如：保存配置後或初始頁面載入
 async function loadPortfolioSummary() {
   try {
     const response = await fetch("/binance/portfolio/summary");
@@ -997,32 +1052,21 @@ async function loadPortfolioSummary() {
     }
     
     // 更新 Portfolio Trailing 設定
-    // 注意：只在用戶沒有正在編輯時才更新，避免覆蓋用戶正在輸入的值
+    // 只在完整載入時更新（例如：保存後或初始載入）
     const enabledCheckbox = document.getElementById("portfolio-trailing-enabled");
     const targetPnlInput = document.getElementById("portfolio-target-pnl");
     const lockRatioInput = document.getElementById("portfolio-lock-ratio");
     
     if (enabledCheckbox) {
-      // Checkbox 可以安全更新（不會影響正在輸入）
       enabledCheckbox.checked = data.portfolio_trailing.enabled || false;
     }
     
-    // 只更新沒有焦點的輸入欄位（用戶沒有正在編輯）
-    // 如果用戶正在輸入（欄位有焦點），保留用戶輸入的值
     if (targetPnlInput) {
-      const isFocused = document.activeElement === targetPnlInput;
-      if (!isFocused) {
-        // 只有當欄位沒有焦點時才更新（用戶沒有正在編輯）
-        targetPnlInput.value = data.portfolio_trailing.target_pnl ? String(data.portfolio_trailing.target_pnl) : "";
-      }
+      targetPnlInput.value = data.portfolio_trailing.target_pnl ? String(data.portfolio_trailing.target_pnl) : "";
     }
     
     if (lockRatioInput) {
-      const isFocused = document.activeElement === lockRatioInput;
-      if (!isFocused) {
-        // 只有當欄位沒有焦點時才更新（用戶沒有正在編輯）
-        lockRatioInput.value = data.portfolio_trailing.lock_ratio ? String(data.portfolio_trailing.lock_ratio) : "";
-      }
+      lockRatioInput.value = data.portfolio_trailing.lock_ratio ? String(data.portfolio_trailing.lock_ratio) : "";
     }
   } catch (err) {
     console.error("loadPortfolioSummary error:", err);
@@ -1034,8 +1078,8 @@ async function loadBinancePositions() {
   const container = document.getElementById("binance-table-container");
   if (!container) return;
   
-  // 同時載入 Portfolio Summary
-  await loadPortfolioSummary();
+  // 只載入 Portfolio Summary 的值（不更新配置輸入欄位，避免打斷用戶輸入）
+  await loadPortfolioSummaryOnly();
   
   // 檢查是否已有表格（避免首次載入時閃爍）
   const existingTable = container.querySelector("table");
