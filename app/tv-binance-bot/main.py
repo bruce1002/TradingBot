@@ -3959,31 +3959,67 @@ async def close_binance_live_position(
                 if tracked_entry and tracked_entry > 0:
                     entry_price = tracked_entry
         
-        # 建立 Position 記錄（用於統計計算）
+        # 查找現有的 OPEN 倉位（優先更新現有倉位，而不是建立新倉位）
+        existing_position = (
+            db.query(Position)
+            .filter(
+                Position.symbol == symbol.upper(),
+                Position.side == position_side,
+                Position.status == "OPEN",
+            )
+            .order_by(Position.id.desc())
+            .first()
+        )
+        
         try:
-            position = Position(
-                bot_id=None,  # 非 bot 創建的倉位
-                tv_signal_log_id=None,  # 非 bot 創建的倉位
-                symbol=symbol.upper(),
-                side=position_side,
-                qty=qty,
-                entry_price=entry_price if entry_price > 0 else exit_price,  # 如果 entry_price 無效，使用 exit_price 作為 fallback
-                exit_price=exit_price,
-                status="CLOSED",
-                closed_at=datetime.now(timezone.utc),
-                exit_reason="manual_close",  # 手動關閉
-                binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
-                client_order_id=order.get("clientOrderId"),
-            )
-            
-            db.add(position)
-            db.commit()
-            db.refresh(position)
-            
-            logger.info(
-                f"非 bot 創建倉位 {symbol} ({position_side}) 已建立資料庫記錄 "
-                f"(position_id={position.id}, exit_reason=manual_close, exit_price={exit_price})"
-            )
+            if existing_position:
+                # 更新現有倉位
+                existing_position.status = "CLOSED"
+                existing_position.closed_at = datetime.now(timezone.utc)
+                existing_position.exit_price = exit_price
+                existing_position.exit_reason = "manual_close"
+                # 更新訂單資訊（如果有的話）
+                if order.get("orderId"):
+                    existing_position.binance_order_id = int(order.get("orderId"))
+                if order.get("clientOrderId"):
+                    existing_position.client_order_id = order.get("clientOrderId")
+                # 如果 entry_price 有效且現有倉位的 entry_price 無效，更新它
+                if entry_price > 0 and (existing_position.entry_price <= 0 or existing_position.entry_price is None):
+                    existing_position.entry_price = entry_price
+                
+                db.commit()
+                db.refresh(existing_position)
+                
+                logger.info(
+                    f"已更新現有倉位 {symbol} ({position_side}) "
+                    f"(position_id={existing_position.id}, exit_reason=manual_close, exit_price={exit_price})"
+                )
+                position = existing_position
+            else:
+                # 沒有現有倉位，建立新的 Position 記錄（用於統計計算）
+                position = Position(
+                    bot_id=None,  # 非 bot 創建的倉位
+                    tv_signal_log_id=None,  # 非 bot 創建的倉位
+                    symbol=symbol.upper(),
+                    side=position_side,
+                    qty=qty,
+                    entry_price=entry_price if entry_price > 0 else exit_price,  # 如果 entry_price 無效，使用 exit_price 作為 fallback
+                    exit_price=exit_price,
+                    status="CLOSED",
+                    closed_at=datetime.now(timezone.utc),
+                    exit_reason="manual_close",  # 手動關閉
+                    binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                    client_order_id=order.get("clientOrderId"),
+                )
+                
+                db.add(position)
+                db.commit()
+                db.refresh(position)
+                
+                logger.info(
+                    f"非 bot 創建倉位 {symbol} ({position_side}) 已建立資料庫記錄 "
+                    f"(position_id={position.id}, exit_reason=manual_close, exit_price={exit_price})"
+                )
             
             # 清理追蹤記錄
             tracking_key = f"{symbol}|{position_side}"
@@ -3992,8 +4028,9 @@ async def close_binance_live_position(
                 logger.debug(f"清理非 bot 倉位追蹤記錄: {tracking_key}")
             
         except Exception as e:
-            logger.error(f"建立非 bot 創建倉位 {symbol} ({position_side}) 資料庫記錄失敗: {e}")
+            logger.error(f"更新/建立倉位 {symbol} ({position_side}) 資料庫記錄失敗: {e}")
             db.rollback()
+            raise
         
         # 返回關鍵資訊
         return {

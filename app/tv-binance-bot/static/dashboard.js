@@ -1418,6 +1418,9 @@ async function closeBinancePosition(symbol, side) {
 
     // 重新載入 Binance positions
     await loadBinancePositions();
+    
+    // 也重新載入 Bot Positions（因為可能更新了現有倉位）
+    await loadPositions();
   } catch (error) {
     console.error("關閉 Binance Position 失敗:", error);
     alert(`平倉失敗：${error.message}`);
