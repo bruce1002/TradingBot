@@ -188,7 +188,10 @@
                 <!-- Signal Configs Section -->
                 <div id="signal-configs-section">
                     <div class="bots-header-row">
-                        <h2 class="section-title">TradingView Signals</h2>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button id="toggle-signal-configs-section-btn" class="toggle-section-btn" style="background: none; border: none; color: var(--text-primary, #fff); font-size: 16px; cursor: pointer; padding: 4px 8px;">▼</button>
+                            <h2 class="section-title">TradingView Signal Configs <span id="signal-configs-count"></span></h2>
+                        </div>
                         <div style="display: flex; gap: 10px;">
                             <button id="clear-signal-logs-btn" class="btn-danger">Clear Signal Logs</button>
                             <button id="btn-open-signal-form" class="action-btn">New Signal</button>
@@ -270,12 +273,17 @@
                 </div>
                 
                 <!-- Signal Logs (保留原有功能) -->
-                <div id="signals-table-container" style="margin-top: 32px;">
-                    <h3 class="section-title">Signal Logs</h3>
-                    <!-- 載入中... -->
-                    <div class="loading-state">
-                        <div class="loading-spinner"></div>
-                        載入中...
+                <div id="signals-table-section" style="margin-top: 32px;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+                        <button id="toggle-signal-logs-section-btn" class="toggle-section-btn" style="background: none; border: none; color: var(--text-primary, #fff); font-size: 16px; cursor: pointer; padding: 4px 8px;">▼</button>
+                        <h3 class="section-title">Signal Logs <span id="signals-count"></span></h3>
+                    </div>
+                    <div id="signals-table-container">
+                        <!-- 載入中... -->
+                        <div class="loading-state">
+                            <div class="loading-spinner"></div>
+                            載入中...
+                        </div>
                     </div>
                 </div>
             </div>

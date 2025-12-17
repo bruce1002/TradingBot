@@ -29,11 +29,35 @@ function fmtPercent(val) {
   }
 }
 
-// 格式化日期時間（簡化顯示）
+// 格式化日期時間（簡化顯示，轉換為本地時區）
 function fmtDateTime(dtStr) {
   if (!dtStr) return "-";
   try {
-    const dt = new Date(dtStr);
+    // 確保正確解析 ISO 格式的時間（包含時區資訊）
+    // 如果字符串以 Z 結尾（UTC），或者包含時區偏移，Date 會自動處理
+    // 如果沒有時區資訊，假設是 UTC 時間並轉換
+    let dt;
+    if (typeof dtStr === 'string') {
+      // 如果字符串以 Z 結尾，明確表示 UTC
+      if (dtStr.endsWith('Z')) {
+        dt = new Date(dtStr);
+      } else if (dtStr.includes('+') || dtStr.includes('-')) {
+        // 包含時區偏移，直接解析
+        dt = new Date(dtStr);
+      } else {
+        // 沒有時區資訊，假設是 UTC，添加 Z
+        dt = new Date(dtStr + (dtStr.includes('T') ? 'Z' : ''));
+      }
+    } else {
+      dt = new Date(dtStr);
+    }
+    
+    // 檢查日期是否有效
+    if (isNaN(dt.getTime())) {
+      return dtStr.substring(0, 19); // 如果解析失敗，返回原始字符串的前19字元
+    }
+    
+    // 轉換為本地時間並格式化（台灣時間 UTC+8）
     return dt.toLocaleString("zh-TW", {
       year: "numeric",
       month: "2-digit",
@@ -42,6 +66,7 @@ function fmtDateTime(dtStr) {
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
+      timeZone: "Asia/Taipei", // 明確指定台灣時區
     });
   } catch (e) {
     return dtStr.substring(0, 19); // 簡單截取前19字元
@@ -1151,7 +1176,13 @@ function renderBinancePositionsTable(data) {
     let updatedAt = "-";
     if (p.update_time && p.update_time > 0) {
       try {
-        updatedAt = new Date(p.update_time).toLocaleString("zh-TW", {
+        // 確保時間正確處理（如果是字符串，添加 Z 如果沒有時區資訊）
+        const updateTimeStr = typeof p.update_time === 'string' 
+          ? (p.update_time.endsWith('Z') || p.update_time.includes('+') || p.update_time.includes('-') 
+            ? p.update_time 
+            : p.update_time + (p.update_time.includes('T') ? 'Z' : ''))
+          : p.update_time;
+        updatedAt = new Date(updateTimeStr).toLocaleString("zh-TW", {
           year: "numeric",
           month: "2-digit",
           day: "2-digit",
@@ -1159,6 +1190,7 @@ function renderBinancePositionsTable(data) {
           minute: "2-digit",
           second: "2-digit",
           hour12: false,
+          timeZone: "Asia/Taipei", // 明確指定台灣時區
         });
       } catch (e) {
         updatedAt = "-";
@@ -3276,11 +3308,45 @@ function bindSignalConfigsSortEvents() {
   });
 }
 
-// 切換 Signal Configs 表格顯示/隱藏
+// 切換 Signal Configs Section 顯示/隱藏
+function toggleSignalConfigsSection() {
+  const section = document.getElementById("signal-configs-section");
+  const container = document.getElementById("signal-configs-table-container");
+  const toggleBtn = document.getElementById("toggle-signal-configs-section-btn");
+  const formContainer = document.getElementById("signal-form-container");
+
+  if (!section || !toggleBtn) return;
+  
+  const isHidden = container && container.style.display === "none";
+  
+  if (container) {
+    container.style.display = isHidden ? "" : "none";
+  }
+  if (formContainer && !isHidden) {
+    // 如果隱藏 section，也隱藏 form
+    formContainer.style.display = "none";
+  }
+  
+  toggleBtn.textContent = isHidden ? "▼" : "▶";
+}
+
+// 切換 Signal Logs Section 顯示/隱藏
+function toggleSignalLogsSection() {
+  const container = document.getElementById("signals-table-container");
+  const toggleBtn = document.getElementById("toggle-signal-logs-section-btn");
+
+  if (!container || !toggleBtn) return;
+  
+  const isHidden = container.style.display === "none";
+  container.style.display = isHidden ? "" : "none";
+  toggleBtn.textContent = isHidden ? "▼" : "▶";
+}
+
+// 切換 Signal Configs 表格顯示/隱藏（保留向後兼容）
 function toggleSignalConfigsTable() {
   const container = document.getElementById("signal-configs-table-container");
   const toggleBtn = document.getElementById("toggle-signal-configs-btn");
-  
+
   if (!container || !toggleBtn) return;
   
   const isVisible = container.style.display !== 'none';
@@ -3888,7 +3954,17 @@ document.addEventListener("DOMContentLoaded", function() {
     toggleSignalsTable();
   });
   
-  // 綁定切換 Signal Configs 顯示/隱藏按鈕
+  // 綁定切換 Signal Configs Section 顯示/隱藏按鈕
+  document.getElementById("toggle-signal-configs-section-btn")?.addEventListener("click", () => {
+    toggleSignalConfigsSection();
+  });
+  
+  // 綁定切換 Signal Logs Section 顯示/隱藏按鈕
+  document.getElementById("toggle-signal-logs-section-btn")?.addEventListener("click", () => {
+    toggleSignalLogsSection();
+  });
+  
+  // 保留舊的 toggle-signal-configs-btn 以向後兼容（如果存在）
   document.getElementById("toggle-signal-configs-btn")?.addEventListener("click", () => {
     toggleSignalConfigsTable();
   });
