@@ -2544,8 +2544,9 @@ async def webhook_tradingview(
                     if side not in ["BUY", "SELL"]:
                         raise ValueError(f"無效的下單方向: {side}")
                     
-                    # 計算 qty：如果設定了 max_invest_usdt，則根據當前價格計算
-                    qty = calculate_qty_from_max_invest(bot, symbol)
+                    # 計算 qty：使用 bot 設定（max_invest_usdt 或 qty）
+                    # 如果設定了 max_invest_usdt，則根據當前價格計算；否則使用 bot.qty
+                    qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
                     
                     # 設定杠桿
                     try:
@@ -2644,7 +2645,8 @@ async def webhook_tradingview(
                     
                     logger.info(
                         f"Bot {bot.id} ({bot.name}) 位置導向模式: "
-                        f"symbol={symbol}, target={target_position_size}, current={current_qty_signed}"
+                        f"symbol={symbol}, target_direction={'LONG' if target_position_size > 0 else 'SHORT' if target_position_size < 0 else 'CLOSE'}, "
+                        f"current={current_qty_signed}, qty將由bot設定計算(max_invest_usdt={bot.max_invest_usdt}, qty={bot.qty})"
                     )
                     
                     # 設定杠桿（在決定操作前先設定）
@@ -2700,9 +2702,9 @@ async def webhook_tradingview(
                     
                     # Case B: 目標為多倉 (target > 0)
                     elif target_position_size > 0:
-                        target_qty_raw = abs(target_position_size)
-                        # 應用 max_invest_usdt 限制
-                        target_qty = calculate_qty_from_max_invest(bot, symbol, target_qty_raw)
+                        # 忽略 position_size 的數量值，改為使用 bot 設定計算數量
+                        # 使用 bot.max_invest_usdt 計算，如果未設定則使用 bot.qty
+                        target_qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
                         
                         if current_qty_signed > 0:
                             # 已經是多倉
@@ -2902,9 +2904,9 @@ async def webhook_tradingview(
                     
                     # Case C: 目標為空倉 (target < 0)
                     else:
-                        target_qty_raw = abs(target_position_size)
-                        # 應用 max_invest_usdt 限制
-                        target_qty = calculate_qty_from_max_invest(bot, symbol, target_qty_raw)
+                        # 忽略 position_size 的數量值，改為使用 bot 設定計算數量
+                        # 使用 bot.max_invest_usdt 計算，如果未設定則使用 bot.qty
+                        target_qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
                         
                         if current_qty_signed < 0:
                             # 已經是空倉
