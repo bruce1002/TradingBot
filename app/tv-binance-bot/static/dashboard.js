@@ -907,9 +907,20 @@ async function loadTrailingSettings() {
     }
     const cfg = await resp.json();
     // trailing_enabled and auto_close_enabled are always True, no need to set checkboxes
-    document.getElementById("profit-threshold").value = cfg.profit_threshold_pct;
-    document.getElementById("lock-ratio").value = cfg.lock_ratio;
-    document.getElementById("base-sl").value = cfg.base_sl_pct;
+    
+    // 載入 LONG 設定
+    if (cfg.long_config) {
+      document.getElementById("profit-threshold-long").value = cfg.long_config.profit_threshold_pct || "";
+      document.getElementById("lock-ratio-long").value = cfg.long_config.lock_ratio || "";
+      document.getElementById("base-sl-long").value = cfg.long_config.base_sl_pct || "";
+    }
+    
+    // 載入 SHORT 設定
+    if (cfg.short_config) {
+      document.getElementById("profit-threshold-short").value = cfg.short_config.profit_threshold_pct || "";
+      document.getElementById("lock-ratio-short").value = cfg.short_config.lock_ratio || "";
+      document.getElementById("base-sl-short").value = cfg.short_config.base_sl_pct || "";
+    }
   } catch (err) {
     console.error("loadTrailingSettings error:", err);
   }
@@ -919,9 +930,16 @@ async function loadTrailingSettings() {
 async function saveTrailingSettings() {
   const payload = {
     trailing_enabled: true,  // Always enabled
-    profit_threshold_pct: parseFloat(document.getElementById("profit-threshold").value),
-    lock_ratio: parseFloat(document.getElementById("lock-ratio").value),
-    base_sl_pct: parseFloat(document.getElementById("base-sl").value),
+    long_config: {
+      profit_threshold_pct: parseFloat(document.getElementById("profit-threshold-long").value),
+      lock_ratio: parseFloat(document.getElementById("lock-ratio-long").value),
+      base_sl_pct: parseFloat(document.getElementById("base-sl-long").value),
+    },
+    short_config: {
+      profit_threshold_pct: parseFloat(document.getElementById("profit-threshold-short").value),
+      lock_ratio: parseFloat(document.getElementById("lock-ratio-short").value),
+      base_sl_pct: parseFloat(document.getElementById("base-sl-short").value),
+    },
     auto_close_enabled: true,  // Always enabled
   };
 

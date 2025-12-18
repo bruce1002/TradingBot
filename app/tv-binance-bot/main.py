@@ -757,10 +757,13 @@ def compute_stop_state(position: Position, mark_price: float, unrealized_pnl_pct
         position_qty = qty if qty is not None else getattr(position, 'qty', 0)
         position_leverage = leverage if leverage is not None else 20  # 默認杠桿
         
-        # 使用 TRAILING_CONFIG 的設定作為默認值（優先），如果沒有則使用環境變數
-        base_sl_pct_default = TRAILING_CONFIG.base_sl_pct if TRAILING_CONFIG.base_sl_pct is not None else DYN_BASE_SL_PCT
+        # 根據倉位方向取得對應的全局設定
+        side_config = TRAILING_CONFIG.get_config_for_side(position.side)
         trailing_enabled = TRAILING_CONFIG.trailing_enabled if TRAILING_CONFIG.trailing_enabled is not None else DYN_TRAILING_ENABLED
-        profit_threshold_pct_default = TRAILING_CONFIG.profit_threshold_pct if TRAILING_CONFIG.profit_threshold_pct is not None else DYN_PROFIT_THRESHOLD_PCT
+        
+        # 使用對應方向的全局設定作為默認值，如果沒有則使用環境變數
+        base_sl_pct_default = side_config.base_sl_pct if side_config.base_sl_pct is not None else DYN_BASE_SL_PCT
+        profit_threshold_pct_default = side_config.profit_threshold_pct if side_config.profit_threshold_pct is not None else DYN_PROFIT_THRESHOLD_PCT
         
         # 優先使用倉位覆寫值，如果沒有則使用全局配置
         if position.base_stop_loss_pct is not None:
@@ -778,8 +781,8 @@ def compute_stop_state(position: Position, mark_price: float, unrealized_pnl_pct
         # 使用 getattr 安全地訪問屬性（支持 TempPosition 和 Position 對象）
         trail_callback_override = getattr(position, 'trail_callback', None)
         if trail_callback_override is None:
-            # 使用 TRAILING_CONFIG 的 lock_ratio（如果有的話），否則使用預設值
-            lock_ratio = TRAILING_CONFIG.lock_ratio if TRAILING_CONFIG.lock_ratio is not None else DYN_LOCK_RATIO_DEFAULT
+            # 使用對應方向的 TRAILING_CONFIG lock_ratio（如果有的話），否則使用預設值
+            lock_ratio = side_config.lock_ratio if side_config.lock_ratio is not None else DYN_LOCK_RATIO_DEFAULT
         elif trail_callback_override == 0:
             lock_ratio = None
         else:
@@ -1185,10 +1188,13 @@ async def check_trailing_stop(position: Position, db: Session):
         # 使用 compute_stop_state 計算停損狀態（傳入 leverage 和 qty）
         stop_state = compute_stop_state(position, current_price, calculated_unrealized_pnl_pct, leverage_for_stop, qty_for_stop)
         
-        # 使用 TRAILING_CONFIG 的設定作為默認值（優先），如果沒有則使用環境變數
-        base_sl_pct_default = TRAILING_CONFIG.base_sl_pct if TRAILING_CONFIG.base_sl_pct is not None else DYN_BASE_SL_PCT
+        # 根據倉位方向取得對應的全局設定
+        side_config = TRAILING_CONFIG.get_config_for_side(position.side)
         trailing_enabled = TRAILING_CONFIG.trailing_enabled if TRAILING_CONFIG.trailing_enabled is not None else DYN_TRAILING_ENABLED
-        profit_threshold_pct_default = TRAILING_CONFIG.profit_threshold_pct if TRAILING_CONFIG.profit_threshold_pct is not None else DYN_PROFIT_THRESHOLD_PCT
+        
+        # 使用對應方向的全局設定作為默認值，如果沒有則使用環境變數
+        base_sl_pct_default = side_config.base_sl_pct if side_config.base_sl_pct is not None else DYN_BASE_SL_PCT
+        profit_threshold_pct_default = side_config.profit_threshold_pct if side_config.profit_threshold_pct is not None else DYN_PROFIT_THRESHOLD_PCT
         
         # 優先使用倉位覆寫值，如果沒有則使用全局配置
         if position.base_stop_loss_pct is not None:
@@ -1204,8 +1210,8 @@ async def check_trailing_stop(position: Position, db: Session):
         # 先決定這筆單使用的 lock_ratio
         # trail_callback: null → 使用全局配置, 0 → base stop only, >0 → 使用該值作為 lock_ratio
         if position.trail_callback is None:
-            # 使用 TRAILING_CONFIG 的 lock_ratio（如果有的話），否則使用預設值
-            lock_ratio = TRAILING_CONFIG.lock_ratio if TRAILING_CONFIG.lock_ratio is not None else DYN_LOCK_RATIO_DEFAULT
+            # 使用對應方向的 TRAILING_CONFIG lock_ratio（如果有的話），否則使用預設值
+            lock_ratio = side_config.lock_ratio if side_config.lock_ratio is not None else DYN_LOCK_RATIO_DEFAULT
         elif position.trail_callback == 0:
             logger.info(
                 f"倉位 {position.id} ({position.symbol}) trail_callback=0，僅使用 base stop-loss"
@@ -1657,22 +1663,66 @@ class TrailingUpdate(BaseModel):
     activation_profit_percent: Optional[float] = Field(None, description="啟動追蹤停損的獲利百分比，例如：1.0 代表先賺 1% 再啟動追蹤")
 
 
-class TrailingConfig(BaseModel):
-    """Trailing Stop 全域設定模型"""
-    trailing_enabled: bool = True
-    profit_threshold_pct: float = 1.0      # PnL% >= 1% 才啟動鎖利
+class TrailingSideConfig(BaseModel):
+    """單側 (LONG 或 SHORT) 的 Trailing Stop 設定"""
+    profit_threshold_pct: float = 1.0      # PnL% >= 此值才啟動鎖利
     lock_ratio: float = 2.0 / 3.0          # 鎖利比例 (約 0.67 = 2/3)
     base_sl_pct: float = 0.5               # 基礎停損距離 (%)
+
+
+class TrailingConfig(BaseModel):
+    """Trailing Stop 全域設定模型（分 LONG 和 SHORT）"""
+    trailing_enabled: bool = True
+    long_config: TrailingSideConfig = Field(default_factory=lambda: TrailingSideConfig())
+    short_config: TrailingSideConfig = Field(default_factory=lambda: TrailingSideConfig())
     auto_close_enabled: bool = True        # Dynamic Stop 觸發時是否自動關倉
+    
+    # 向後兼容：提供舊的屬性訪問方式（返回 LONG 的設定）
+    @property
+    def profit_threshold_pct(self) -> float:
+        """向後兼容：返回 LONG 的 profit_threshold_pct"""
+        return self.long_config.profit_threshold_pct
+    
+    @property
+    def lock_ratio(self) -> float:
+        """向後兼容：返回 LONG 的 lock_ratio"""
+        return self.long_config.lock_ratio
+    
+    @property
+    def base_sl_pct(self) -> float:
+        """向後兼容：返回 LONG 的 base_sl_pct"""
+        return self.long_config.base_sl_pct
+    
+    def get_config_for_side(self, side: str) -> TrailingSideConfig:
+        """根據倉位方向取得對應的設定"""
+        side_upper = side.upper()
+        if side_upper == "LONG":
+            return self.long_config
+        elif side_upper == "SHORT":
+            return self.short_config
+        else:
+            # 預設返回 LONG 設定
+            return self.long_config
+
+
+class TrailingSideConfigUpdate(BaseModel):
+    """更新單側 Trailing 設定的請求格式"""
+    profit_threshold_pct: Optional[float] = None
+    lock_ratio: Optional[float] = None
+    base_sl_pct: Optional[float] = None
 
 
 class TrailingConfigUpdate(BaseModel):
     """更新 Trailing 設定的請求格式"""
     trailing_enabled: Optional[bool] = None
+    long_config: Optional[TrailingSideConfigUpdate] = None
+    short_config: Optional[TrailingSideConfigUpdate] = None
+    auto_close_enabled: Optional[bool] = None
+    
+    # 向後兼容：支援舊格式（會同時更新 LONG 和 SHORT）
     profit_threshold_pct: Optional[float] = None
     lock_ratio: Optional[float] = None
     base_sl_pct: Optional[float] = None
-    auto_close_enabled: Optional[bool] = None
 
 
 class BinanceCloseRequest(BaseModel):
@@ -1784,11 +1834,23 @@ class WebhookResponse(BaseModel):
 #   DYN_PROFIT_THRESHOLD_PCT=1.0    (PnL% threshold)
 #   DYN_LOCK_RATIO_DEFAULT=0.666    (Lock ratio, 例如 0.666 代表 2/3)
 #   DYN_BASE_SL_PCT=0.5              (Base SL %)
+# 初始化 TRAILING_CONFIG，從環境變數讀取設定
+_default_profit_threshold = float(os.getenv("DYN_PROFIT_THRESHOLD_PCT", "1.0"))
+_default_lock_ratio = float(os.getenv("DYN_LOCK_RATIO_DEFAULT", str(2.0 / 3.0)))
+_default_base_sl = float(os.getenv("DYN_BASE_SL_PCT", "0.5"))
+
 TRAILING_CONFIG = TrailingConfig(
     trailing_enabled=True,
-    profit_threshold_pct=float(os.getenv("DYN_PROFIT_THRESHOLD_PCT", "1.0")),      # 從 .env 讀取，預設 1.0
-    lock_ratio=float(os.getenv("DYN_LOCK_RATIO_DEFAULT", str(2.0 / 3.0))),        # 從 .env 讀取，預設 0.666... (2/3)
-    base_sl_pct=float(os.getenv("DYN_BASE_SL_PCT", "0.5")),                      # 從 .env 讀取，預設 0.5
+    long_config=TrailingSideConfig(
+        profit_threshold_pct=_default_profit_threshold,
+        lock_ratio=_default_lock_ratio,
+        base_sl_pct=_default_base_sl
+    ),
+    short_config=TrailingSideConfig(
+        profit_threshold_pct=_default_profit_threshold,
+        lock_ratio=_default_lock_ratio,
+        base_sl_pct=_default_base_sl
+    ),
     auto_close_enabled=True
 )
 
@@ -4295,8 +4357,9 @@ async def update_trailing_settings(
     """
     global TRAILING_CONFIG
     
-    # 保存舊的 lock_ratio 值（用於更新使用舊全局值的倉位）
-    old_lock_ratio = TRAILING_CONFIG.lock_ratio if TRAILING_CONFIG.lock_ratio is not None else None
+    # 保存舊的 lock_ratio 值（用於更新使用舊全局值的倉位）- 使用 LONG 作為參考
+    old_lock_ratio_long = TRAILING_CONFIG.long_config.lock_ratio
+    old_lock_ratio_short = TRAILING_CONFIG.short_config.lock_ratio
     
     # 使用 dict() 方法（Pydantic v1/v2 兼容）
     if hasattr(TRAILING_CONFIG, 'model_dump'):
@@ -4313,77 +4376,150 @@ async def update_trailing_settings(
     data['trailing_enabled'] = True
     data['auto_close_enabled'] = True
     
-    # 範圍防呆：比對 blofin_test.py 的邏輯
-    if "lock_ratio" in data:
-        if data["lock_ratio"] is not None and data["lock_ratio"] < 0:
-            raise HTTPException(
-                status_code=400,
-                detail="lock_ratio 不能小於 0"
-            )
-        if data["lock_ratio"] is not None and data["lock_ratio"] > 1:
-            logger.warning(f"lock_ratio > 1（值={data['lock_ratio']}），已強制調整為 1.0")
-            data["lock_ratio"] = 1.0
+    # 處理向後兼容：如果提供了舊格式的設定（profit_threshold_pct, lock_ratio, base_sl_pct），
+    # 同時更新 LONG 和 SHORT 的設定
+    if "profit_threshold_pct" in data or "lock_ratio" in data or "base_sl_pct" in data:
+        if "long_config" not in data:
+            if hasattr(TRAILING_CONFIG.long_config, 'model_dump'):
+                data['long_config'] = TRAILING_CONFIG.long_config.model_dump()
+            else:
+                data['long_config'] = TRAILING_CONFIG.long_config.dict()
+        if "short_config" not in data:
+            if hasattr(TRAILING_CONFIG.short_config, 'model_dump'):
+                data['short_config'] = TRAILING_CONFIG.short_config.model_dump()
+            else:
+                data['short_config'] = TRAILING_CONFIG.short_config.dict()
+        
+        # 同時更新 LONG 和 SHORT
+        if "profit_threshold_pct" in data:
+            data['long_config']['profit_threshold_pct'] = data['profit_threshold_pct']
+            data['short_config']['profit_threshold_pct'] = data['profit_threshold_pct']
+            del data['profit_threshold_pct']
+        
+        if "lock_ratio" in data:
+            data['long_config']['lock_ratio'] = data['lock_ratio']
+            data['short_config']['lock_ratio'] = data['lock_ratio']
+            del data['lock_ratio']
+        
+        if "base_sl_pct" in data:
+            data['long_config']['base_sl_pct'] = data['base_sl_pct']
+            data['short_config']['base_sl_pct'] = data['base_sl_pct']
+            del data['base_sl_pct']
     
-    if "profit_threshold_pct" in data:
-        if data["profit_threshold_pct"] is not None and data["profit_threshold_pct"] < 0:
-            raise HTTPException(
-                status_code=400,
-                detail="profit_threshold_pct 不能小於 0"
-            )
+    # 處理 LONG 設定
+    if "long_config" in data:
+        long_data = data['long_config']
+        if not isinstance(long_data, dict):
+            if hasattr(long_data, 'model_dump'):
+                long_data = long_data.model_dump(exclude_unset=True)
+            else:
+                long_data = long_data.dict(exclude_unset=True)
+        
+        # 驗證 LONG 設定
+        if "lock_ratio" in long_data:
+            if long_data["lock_ratio"] is not None and long_data["lock_ratio"] < 0:
+                raise HTTPException(status_code=400, detail="LONG lock_ratio 不能小於 0")
+            if long_data["lock_ratio"] is not None and long_data["lock_ratio"] > 1:
+                logger.warning(f"LONG lock_ratio > 1（值={long_data['lock_ratio']}），已強制調整為 1.0")
+                long_data["lock_ratio"] = 1.0
+        
+        if "profit_threshold_pct" in long_data:
+            if long_data["profit_threshold_pct"] is not None and long_data["profit_threshold_pct"] < 0:
+                raise HTTPException(status_code=400, detail="LONG profit_threshold_pct 不能小於 0")
+        
+        if "base_sl_pct" in long_data:
+            if long_data["base_sl_pct"] is not None and long_data["base_sl_pct"] < 0:
+                raise HTTPException(status_code=400, detail="LONG base_sl_pct 不能小於 0")
+        
+        # 更新 LONG 設定
+        if 'long_config' not in updated:
+            updated['long_config'] = {}
+        updated['long_config'].update(long_data)
+        data['long_config'] = updated['long_config']
     
-    if "base_sl_pct" in data:
-        if data["base_sl_pct"] is not None and data["base_sl_pct"] < 0:
-            raise HTTPException(
-                status_code=400,
-                detail="base_sl_pct 不能小於 0"
-            )
+    # 處理 SHORT 設定
+    if "short_config" in data:
+        short_data = data['short_config']
+        if not isinstance(short_data, dict):
+            if hasattr(short_data, 'model_dump'):
+                short_data = short_data.model_dump(exclude_unset=True)
+            else:
+                short_data = short_data.dict(exclude_unset=True)
+        
+        # 驗證 SHORT 設定
+        if "lock_ratio" in short_data:
+            if short_data["lock_ratio"] is not None and short_data["lock_ratio"] < 0:
+                raise HTTPException(status_code=400, detail="SHORT lock_ratio 不能小於 0")
+            if short_data["lock_ratio"] is not None and short_data["lock_ratio"] > 1:
+                logger.warning(f"SHORT lock_ratio > 1（值={short_data['lock_ratio']}），已強制調整為 1.0")
+                short_data["lock_ratio"] = 1.0
+        
+        if "profit_threshold_pct" in short_data:
+            if short_data["profit_threshold_pct"] is not None and short_data["profit_threshold_pct"] < 0:
+                raise HTTPException(status_code=400, detail="SHORT profit_threshold_pct 不能小於 0")
+        
+        if "base_sl_pct" in short_data:
+            if short_data["base_sl_pct"] is not None and short_data["base_sl_pct"] < 0:
+                raise HTTPException(status_code=400, detail="SHORT base_sl_pct 不能小於 0")
+        
+        # 更新 SHORT 設定
+        if 'short_config' not in updated:
+            updated['short_config'] = {}
+        updated['short_config'].update(short_data)
+        data['short_config'] = updated['short_config']
     
-    # 更新設定
-    updated.update(data)
-    new_lock_ratio = data.get("lock_ratio") if "lock_ratio" in data else None
+    # 更新其他欄位（trailing_enabled, auto_close_enabled）
+    for key in ['trailing_enabled', 'auto_close_enabled']:
+        if key in data:
+            updated[key] = data[key]
+    
+    # 重新建立 TrailingConfig 物件
     TRAILING_CONFIG = TrailingConfig(**updated)
     
-    # 如果 lock_ratio 被更新，更新所有使用舊全局值的 OPEN 倉位
-    if "lock_ratio" in data and old_lock_ratio != new_lock_ratio:
-        try:
-            # 找出所有 OPEN 狀態且 trail_callback 等於舊全局 lock_ratio 的倉位
-            # 這些倉位原本是使用全局配置創建的，應該更新為新的全局值
-            if old_lock_ratio is not None:
-                # 舊值不是 None，找出所有等於舊值的倉位並更新
-                positions_to_update = (
-                    db.query(Position)
-                    .filter(
-                        Position.status == "OPEN",
-                        Position.trail_callback == old_lock_ratio
+    # 處理 lock_ratio 更新後的倉位同步
+    # 如果 LONG 或 SHORT 的 lock_ratio 被更新，更新對應的 OPEN 倉位
+    for side_name, side_key, old_ratio in [("LONG", "long_config", old_lock_ratio_long), 
+                                           ("SHORT", "short_config", old_lock_ratio_short)]:
+        side_config_updated = "long_config" in data or "short_config" in data
+        new_ratio = getattr(TRAILING_CONFIG, side_key).lock_ratio
+        
+        if side_config_updated and old_ratio != new_ratio:
+            try:
+                # 找出所有 OPEN 狀態、對應方向且 trail_callback 等於舊全局 lock_ratio 的倉位
+                if old_ratio is not None:
+                    positions_to_update = (
+                        db.query(Position)
+                        .filter(
+                            Position.status == "OPEN",
+                            Position.side == side_name,
+                            Position.trail_callback == old_ratio
+                        )
+                        .all()
                     )
-                    .all()
-                )
-            else:
-                # 舊值是 None，找出所有 trail_callback 為 None 的倉位並更新
-                # （雖然 None 的倉位會動態使用全局配置，但為了保持一致，也更新它們）
-                positions_to_update = (
-                    db.query(Position)
-                    .filter(
-                        Position.status == "OPEN",
-                        Position.trail_callback.is_(None)
-                    )
-                    .all()
-                )
-            
-            if positions_to_update:
-                for position in positions_to_update:
-                    position.trail_callback = new_lock_ratio
-                    logger.info(
-                        f"更新倉位 {position.id} ({position.symbol}) 的 lock_ratio: "
-                        f"{old_lock_ratio} -> {new_lock_ratio} (跟隨全局配置更新)"
+                else:
+                    positions_to_update = (
+                        db.query(Position)
+                        .filter(
+                            Position.status == "OPEN",
+                            Position.side == side_name,
+                            Position.trail_callback.is_(None)
+                        )
+                        .all()
                     )
                 
-                db.commit()
-                logger.info(f"已更新 {len(positions_to_update)} 個 OPEN 倉位的 lock_ratio 以匹配新的全局配置")
-        except Exception as e:
-            logger.error(f"更新倉位的 lock_ratio 時發生錯誤: {e}", exc_info=True)
-            # 不影響全局配置的更新，只記錄錯誤
-            db.rollback()
+                if positions_to_update:
+                    for position in positions_to_update:
+                        position.trail_callback = new_ratio
+                        logger.info(
+                            f"更新倉位 {position.id} ({position.symbol}) {side_name} 的 lock_ratio: "
+                            f"{old_ratio} -> {new_ratio} (跟隨全局配置更新)"
+                        )
+                    
+                    db.commit()
+                    logger.info(f"已更新 {len(positions_to_update)} 個 {side_name} OPEN 倉位的 lock_ratio 以匹配新的全局配置")
+            except Exception as e:
+                logger.error(f"更新 {side_name} 倉位的 lock_ratio 時發生錯誤: {e}", exc_info=True)
+                db.rollback()
     
     # 使用兼容的序列化方法
     if hasattr(TRAILING_CONFIG, 'model_dump_json'):

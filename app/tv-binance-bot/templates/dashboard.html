@@ -32,18 +32,41 @@
             
             <!-- Trailing Settings -->
             <div class="trailing-settings">
-                <label class="setting-item">
-                    <span>PnL% threshold (%):</span>
-                    <input type="number" id="profit-threshold" step="0.1" min="0" class="setting-input">
-                </label>
-                <label class="setting-item">
-                    <span>Lock ratio:</span>
-                    <input type="number" id="lock-ratio" step="0.05" min="0" max="1" class="setting-input">
-                </label>
-                <label class="setting-item">
-                    <span>Base SL (%):</span>
-                    <input type="number" id="base-sl" step="0.1" min="0" class="setting-input">
-                </label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px;">
+                    <!-- LONG Settings -->
+                    <div style="border: 1px solid var(--border-color, #333); padding: 15px; border-radius: 8px; background: var(--card-bg, #1e1e1e);">
+                        <h4 style="margin: 0 0 15px 0; color: var(--pnl-positive, #00ff88);">LONG Positions</h4>
+                        <label class="setting-item">
+                            <span>PnL% threshold (%):</span>
+                            <input type="number" id="profit-threshold-long" step="0.1" min="0" class="setting-input">
+                        </label>
+                        <label class="setting-item">
+                            <span>Lock ratio:</span>
+                            <input type="number" id="lock-ratio-long" step="0.05" min="0" max="1" class="setting-input">
+                        </label>
+                        <label class="setting-item">
+                            <span>Base SL (%):</span>
+                            <input type="number" id="base-sl-long" step="0.1" min="0" class="setting-input">
+                        </label>
+                    </div>
+                    
+                    <!-- SHORT Settings -->
+                    <div style="border: 1px solid var(--border-color, #333); padding: 15px; border-radius: 8px; background: var(--card-bg, #1e1e1e);">
+                        <h4 style="margin: 0 0 15px 0; color: var(--pnl-negative, #ff4444);">SHORT Positions</h4>
+                        <label class="setting-item">
+                            <span>PnL% threshold (%):</span>
+                            <input type="number" id="profit-threshold-short" step="0.1" min="0" class="setting-input">
+                        </label>
+                        <label class="setting-item">
+                            <span>Lock ratio:</span>
+                            <input type="number" id="lock-ratio-short" step="0.05" min="0" max="1" class="setting-input">
+                        </label>
+                        <label class="setting-item">
+                            <span>Base SL (%):</span>
+                            <input type="number" id="base-sl-short" step="0.1" min="0" class="setting-input">
+                        </label>
+                    </div>
+                </div>
                 <button id="save-trailing-settings" class="action-btn">Save</button>
                 <div class="setting-note">
                     <small>Note: Dynamic Stop and Auto close are always enabled by default.</small>
