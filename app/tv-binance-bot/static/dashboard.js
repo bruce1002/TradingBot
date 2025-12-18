@@ -439,10 +439,14 @@ function renderPositionsTable(data) {
 // 載入倉位資料
 // 取得篩選參數
 function getFilterParams() {
-  const symbol = document.getElementById("filter-symbol")?.value || "";
-  const status = document.getElementById("filter-status")?.value || "";
-  const startDate = document.getElementById("filter-start-date")?.value || "";
-  const endDate = document.getElementById("filter-end-date")?.value || "";
+  const symbolEl = document.getElementById("filter-symbol");
+  const statusEl = document.getElementById("filter-status");
+  const startDateEl = document.getElementById("filter-start-date");
+  const endDateEl = document.getElementById("filter-end-date");
+  const symbol = (symbolEl && symbolEl.value) ? symbolEl.value : "";
+  const status = (statusEl && statusEl.value) ? statusEl.value : "";
+  const startDate = (startDateEl && startDateEl.value) ? startDateEl.value : "";
+  const endDate = (endDateEl && endDateEl.value) ? endDateEl.value : "";
   
   const params = new URLSearchParams();
   if (symbol) params.append("symbol", symbol);
@@ -936,23 +940,31 @@ async function saveTrailingSettings() {
     return isNaN(parsed) ? null : parsed;
   };
 
+  // Get input elements safely (compatible with older browsers)
+  const profitThresholdLong = document.getElementById("profit-threshold-long");
+  const lockRatioLong = document.getElementById("lock-ratio-long");
+  const baseSlLong = document.getElementById("base-sl-long");
+  const profitThresholdShort = document.getElementById("profit-threshold-short");
+  const lockRatioShort = document.getElementById("lock-ratio-short");
+  const baseSlShort = document.getElementById("base-sl-short");
+
   const payload = {
     trailing_enabled: true,  // Always enabled
     long_config: {
-      profit_threshold_pct: parseValue(document.getElementById("profit-threshold-long")?.value),
-      lock_ratio: parseValue(document.getElementById("lock-ratio-long")?.value),
-      base_sl_pct: parseValue(document.getElementById("base-sl-long")?.value),
+      profit_threshold_pct: parseValue(profitThresholdLong ? profitThresholdLong.value : ""),
+      lock_ratio: parseValue(lockRatioLong ? lockRatioLong.value : ""),
+      base_sl_pct: parseValue(baseSlLong ? baseSlLong.value : ""),
     },
     short_config: {
-      profit_threshold_pct: parseValue(document.getElementById("profit-threshold-short")?.value),
-      lock_ratio: parseValue(document.getElementById("lock-ratio-short")?.value),
-      base_sl_pct: parseValue(document.getElementById("base-sl-short")?.value),
+      profit_threshold_pct: parseValue(profitThresholdShort ? profitThresholdShort.value : ""),
+      lock_ratio: parseValue(lockRatioShort ? lockRatioShort.value : ""),
+      base_sl_pct: parseValue(baseSlShort ? baseSlShort.value : ""),
     },
     auto_close_enabled: true,  // Always enabled
   };
 
   const btn = document.getElementById("save-trailing-settings");
-  const originalText = btn?.textContent || "Save";
+  const originalText = (btn && btn.textContent) ? btn.textContent : "Save";
   if (btn) {
     btn.disabled = true;
     btn.textContent = "儲存中...";
@@ -4117,7 +4129,8 @@ document.addEventListener("DOMContentLoaded", function() {
       return;
     }
     
-    const includeError = document.getElementById("delete-include-error")?.checked || false;
+    const includeErrorEl = document.getElementById("delete-include-error");
+    const includeError = (includeErrorEl && includeErrorEl.checked) ? includeErrorEl.checked : false;
     const confirmMsg = includeError 
       ? `確定要刪除 ${days} 天前關閉的倉位記錄和所有 ERROR 狀態的倉位嗎？此操作無法復原。`
       : `確定要刪除 ${days} 天前關閉的倉位記錄嗎？此操作無法復原。`;
@@ -4184,9 +4197,9 @@ document.addEventListener("DOMContentLoaded", function() {
   document.getElementById("bot-export-excel")?.addEventListener("click", () => {
     const startDateInput = document.getElementById("bot-start-date");
     const endDateInput = document.getElementById("bot-end-date");
-    
-    const start = startDateInput?.value || "";
-    const end = endDateInput?.value || "";
+
+    const start = (startDateInput && startDateInput.value) ? startDateInput.value : "";
+    const end = (endDateInput && endDateInput.value) ? endDateInput.value : "";
     
     let url = "/bot-positions/export";
     const params = [];
