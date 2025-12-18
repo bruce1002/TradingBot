@@ -2711,6 +2711,24 @@ async function onSubmitBotForm(event) {
     payload.base_stop_loss_pct = baseStopLossPct;
     payload.signal_id = signalId;
     
+    // 編輯模式：如果 max_invest_usdt 被改變，需要密碼
+    // 先獲取當前 bot 的 max_invest_usdt 值來比較（從已載入的 bot 列表中）
+    const botsList = await fetch("/bots").then(r => r.ok ? r.json() : []).catch(() => []);
+    const currentBot = botsList.find(b => b.id === currentEditingBotId);
+    if (currentBot && currentBot.max_invest_usdt !== maxInvestUsdt) {
+      // max_invest_usdt 被改變了，需要密碼
+      const password = prompt("請輸入密碼以更新 Max Invest USDT:");
+      if (password === null) {
+        // 用戶取消
+        return;
+      }
+      if (!password || password.trim() === "") {
+        showBotFormError("密碼不能為空");
+        return;
+      }
+      payload.max_invest_password = password.trim();
+    }
+    
     // 編輯模式：直接提交
     await submitBotPayload(payload, event.target);
   } else {

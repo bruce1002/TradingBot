@@ -1803,6 +1803,7 @@ class BotConfigUpdate(BaseModel):
     trailing_callback_percent: Optional[float] = None
     base_stop_loss_pct: Optional[float] = None
     signal_id: Optional[int] = None
+    max_invest_password: Optional[str] = Field(None, description="更新 max_invest_usdt 時需要的密碼")
 
 
 class BotConfigOut(BotConfigBase):
@@ -5145,8 +5146,25 @@ async def update_bot(
     # 取得更新資料
     update_data = bot_update.model_dump(exclude_unset=True) if hasattr(bot_update, 'model_dump') else bot_update.dict(exclude_unset=True)
     
-    # 驗證
+    # 驗證：如果更新 max_invest_usdt，需要檢查密碼
     if "max_invest_usdt" in update_data and update_data["max_invest_usdt"] is not None:
+        # 檢查是否真的改變了（如果是新值與舊值相同，不需要密碼）
+        old_max_invest = bot.max_invest_usdt
+        new_max_invest = update_data["max_invest_usdt"]
+        if old_max_invest != new_max_invest:
+            # max_invest_usdt 被改變了，需要密碼驗證
+            required_password = os.getenv("MAX_INVEST_PASSWORD", "")
+            if not required_password:
+                logger.warning("MAX_INVEST_PASSWORD 未設定在環境變數中，跳過密碼驗證")
+            else:
+                provided_password = update_data.get("max_invest_password")
+                if not provided_password or provided_password != required_password:
+                    logger.warning(f"Bot {bot_id} 更新 max_invest_usdt 時密碼驗證失敗")
+                    raise HTTPException(
+                        status_code=403,
+                        detail="更新 Max Invest USDT 需要密碼驗證，密碼不正確"
+                    )
+        
         if update_data["max_invest_usdt"] <= 0:
             raise HTTPException(status_code=400, detail="max_invest_usdt 必須大於 0")
     if "qty" in update_data and update_data["qty"] is not None and update_data["qty"] <= 0:
@@ -5354,6 +5372,7 @@ class BulkUpdateInvestAmountRequest(BaseModel):
     """批量更新投資金額的請求格式"""
     max_invest_usdt: float = Field(..., gt=0, description="新的投資金額（USDT），必須大於 0")
     bot_ids: Optional[List[int]] = Field(None, description="可選的 Bot ID 列表，如果提供則僅更新這些 Bot，否則更新所有 Bot")
+    max_invest_password: str = Field(..., description="更新 max_invest_usdt 時需要的密碼")
 
 
 @app.post("/bots/bulk-update-invest-amount")
@@ -5363,24 +5382,37 @@ async def bulk_update_invest_amount(
 ):
     """
     批量調整所有 Bot 的投資金額（max_invest_usdt）
-    
+
     僅限已登入的管理員使用。
     可以一次更新所有 Bot，或僅更新指定的 Bot IDs。
-    
+    需要提供密碼驗證。
+
     Args:
-        request: 包含 max_invest_usdt 和可選的 bot_ids
+        request: 包含 max_invest_usdt、可選的 bot_ids 和必需的密碼
         user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
-    
+
     Returns:
         dict: 包含以下欄位的字典：
             - success: 是否成功
             - updated_count: 更新的 Bot 數量
             - bot_ids: 已更新的 Bot ID 列表
             - message: 操作結果訊息
-    
+
     Raises:
-        HTTPException: 當 max_invest_usdt 無效時
+        HTTPException: 當 max_invest_usdt 無效或密碼不正確時
     """
+    # 驗證密碼
+    required_password = os.getenv("MAX_INVEST_PASSWORD", "")
+    if not required_password:
+        logger.warning("MAX_INVEST_PASSWORD 未設定在環境變數中，跳過密碼驗證")
+    else:
+        if not request.max_invest_password or request.max_invest_password != required_password:
+            logger.warning("批量更新 max_invest_usdt 時密碼驗證失敗")
+            raise HTTPException(
+                status_code=403,
+                detail="更新 Max Invest USDT 需要密碼驗證，密碼不正確"
+            )
+    
     try:
         result = update_all_bots_invest_amount(
             max_invest_usdt=request.max_invest_usdt,
