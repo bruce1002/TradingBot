@@ -2604,12 +2604,14 @@ async def webhook_tradingview(
                     
                     position_side = "LONG" if side == "BUY" else "SHORT"
                     
-                    # 設定 trail_callback
+                    # 設定 trail_callback（使用對應方向的全局設定）
                     trail_callback = None
                     if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                         trail_callback = bot.trailing_callback_percent / 100.0
-                    elif TRAILING_CONFIG.trailing_enabled and TRAILING_CONFIG.lock_ratio:
-                        trail_callback = TRAILING_CONFIG.lock_ratio
+                    elif TRAILING_CONFIG.trailing_enabled:
+                        side_config = TRAILING_CONFIG.get_config_for_side(position_side)
+                        if side_config.lock_ratio:
+                            trail_callback = side_config.lock_ratio
                     
                     # 建立 Position 記錄
                     position = Position(
@@ -2755,8 +2757,10 @@ async def webhook_tradingview(
                                         trail_callback = None
                                         if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                             trail_callback = bot.trailing_callback_percent / 100.0
-                                        elif TRAILING_CONFIG.trailing_enabled and TRAILING_CONFIG.lock_ratio:
-                                            trail_callback = TRAILING_CONFIG.lock_ratio
+                                        elif TRAILING_CONFIG.trailing_enabled:
+                                            side_config = TRAILING_CONFIG.get_config_for_side("LONG")
+                                            if side_config.lock_ratio:
+                                                trail_callback = side_config.lock_ratio
                                         
                                         position = Position(
                                             bot_id=bot.id,
@@ -2825,8 +2829,10 @@ async def webhook_tradingview(
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled and TRAILING_CONFIG.lock_ratio:
-                                    trail_callback = TRAILING_CONFIG.lock_ratio
+                                elif TRAILING_CONFIG.trailing_enabled:
+                                    side_config = TRAILING_CONFIG.get_config_for_side("LONG")
+                                    if side_config.lock_ratio:
+                                        trail_callback = side_config.lock_ratio
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -2873,8 +2879,10 @@ async def webhook_tradingview(
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled and TRAILING_CONFIG.lock_ratio:
-                                    trail_callback = TRAILING_CONFIG.lock_ratio
+                                elif TRAILING_CONFIG.trailing_enabled:
+                                    side_config = TRAILING_CONFIG.get_config_for_side("LONG")
+                                    if side_config.lock_ratio:
+                                        trail_callback = side_config.lock_ratio
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -2953,8 +2961,10 @@ async def webhook_tradingview(
                                         trail_callback = None
                                         if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                             trail_callback = bot.trailing_callback_percent / 100.0
-                                        elif TRAILING_CONFIG.trailing_enabled and TRAILING_CONFIG.lock_ratio:
-                                            trail_callback = TRAILING_CONFIG.lock_ratio
+                                        elif TRAILING_CONFIG.trailing_enabled:
+                                            side_config = TRAILING_CONFIG.get_config_for_side("SHORT")
+                                            if side_config.lock_ratio:
+                                                trail_callback = side_config.lock_ratio
                                         
                                         position = Position(
                                             bot_id=bot.id,
@@ -3021,8 +3031,10 @@ async def webhook_tradingview(
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled and TRAILING_CONFIG.lock_ratio:
-                                    trail_callback = TRAILING_CONFIG.lock_ratio
+                                elif TRAILING_CONFIG.trailing_enabled:
+                                    side_config = TRAILING_CONFIG.get_config_for_side("SHORT")
+                                    if side_config.lock_ratio:
+                                        trail_callback = side_config.lock_ratio
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -3069,8 +3081,10 @@ async def webhook_tradingview(
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled and TRAILING_CONFIG.lock_ratio:
-                                    trail_callback = TRAILING_CONFIG.lock_ratio
+                                elif TRAILING_CONFIG.trailing_enabled:
+                                    side_config = TRAILING_CONFIG.get_config_for_side("SHORT")
+                                    if side_config.lock_ratio:
+                                        trail_callback = side_config.lock_ratio
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -3196,6 +3210,9 @@ async def get_positions(
     for pos in positions:
         pos_dict = pos.to_dict()
         
+        # 取得對應方向的全局設定
+        side_config = TRAILING_CONFIG.get_config_for_side(pos.side)
+        
         # 計算實際使用的值和來源標記
         # Profit Threshold
         profit_threshold_value = None
@@ -3203,8 +3220,8 @@ async def get_positions(
         if pos.dyn_profit_threshold_pct is not None:
             profit_threshold_value = pos.dyn_profit_threshold_pct
             profit_threshold_source = "override"  # position 的設定視為 override
-        elif TRAILING_CONFIG.profit_threshold_pct is not None:
-            profit_threshold_value = TRAILING_CONFIG.profit_threshold_pct
+        elif side_config.profit_threshold_pct is not None:
+            profit_threshold_value = side_config.profit_threshold_pct
             profit_threshold_source = "global"
         else:
             profit_threshold_value = DYN_PROFIT_THRESHOLD_PCT
@@ -3216,8 +3233,8 @@ async def get_positions(
         if pos.trail_callback is not None:
             lock_ratio_value = pos.trail_callback
             lock_ratio_source = "override"  # position 的設定視為 override
-        elif TRAILING_CONFIG.lock_ratio is not None:
-            lock_ratio_value = TRAILING_CONFIG.lock_ratio
+        elif side_config.lock_ratio is not None:
+            lock_ratio_value = side_config.lock_ratio
             lock_ratio_source = "global"
         else:
             lock_ratio_value = DYN_LOCK_RATIO_DEFAULT
@@ -3229,8 +3246,8 @@ async def get_positions(
         if pos.base_stop_loss_pct is not None:
             base_sl_value = pos.base_stop_loss_pct
             base_sl_source = "override"  # position 的設定視為 override
-        elif TRAILING_CONFIG.base_sl_pct is not None:
-            base_sl_value = TRAILING_CONFIG.base_sl_pct
+        elif side_config.base_sl_pct is not None:
+            base_sl_value = side_config.base_sl_pct
             base_sl_source = "global"
         else:
             base_sl_value = DYN_BASE_SL_PCT
@@ -3961,8 +3978,9 @@ async def get_binance_open_positions(
                 logger.warning(f"計算倉位 {symbol} ({side_local}) 停損狀態時發生錯誤: {e}")
                 # 即使計算失敗，也嘗試使用基本配置計算 base stop（如果有配置）
                 try:
-                    # 使用全局配置嘗試計算 base stop
-                    base_sl_pct = TRAILING_CONFIG.base_sl_pct if TRAILING_CONFIG.base_sl_pct is not None else DYN_BASE_SL_PCT
+                    # 使用對應方向的全局配置嘗試計算 base stop
+                    side_config = TRAILING_CONFIG.get_config_for_side(side_local)
+                    base_sl_pct = side_config.base_sl_pct if side_config.base_sl_pct is not None else DYN_BASE_SL_PCT
                     if base_sl_pct > 0 and entry_price > 0:
                         if side_local == "LONG":
                             base_stop_price = entry_price * (1 - base_sl_pct / 100.0)
@@ -4008,6 +4026,9 @@ async def get_binance_open_positions(
             #   "global" - 全局設定（藍色）
             #   "default" - 默認值（灰色）
             
+            # 取得對應方向的全局設定
+            side_config = TRAILING_CONFIG.get_config_for_side(side_local)
+            
             # Profit Threshold (dyn_profit_threshold_pct)
             profit_threshold_value = None
             profit_threshold_source = None
@@ -4017,8 +4038,8 @@ async def get_binance_open_positions(
             elif local_pos and local_pos.dyn_profit_threshold_pct is not None:
                 profit_threshold_value = local_pos.dyn_profit_threshold_pct
                 profit_threshold_source = "override"  # bot position 的設定也視為 override
-            elif TRAILING_CONFIG.profit_threshold_pct is not None:
-                profit_threshold_value = TRAILING_CONFIG.profit_threshold_pct
+            elif side_config.profit_threshold_pct is not None:
+                profit_threshold_value = side_config.profit_threshold_pct
                 profit_threshold_source = "global"
             else:
                 profit_threshold_value = DYN_PROFIT_THRESHOLD_PCT
@@ -4033,8 +4054,8 @@ async def get_binance_open_positions(
             elif local_pos and local_pos.trail_callback is not None:
                 lock_ratio_value = local_pos.trail_callback
                 lock_ratio_source = "override"  # bot position 的設定也視為 override
-            elif TRAILING_CONFIG.lock_ratio is not None:
-                lock_ratio_value = TRAILING_CONFIG.lock_ratio
+            elif side_config.lock_ratio is not None:
+                lock_ratio_value = side_config.lock_ratio
                 lock_ratio_source = "global"
             else:
                 lock_ratio_value = DYN_LOCK_RATIO_DEFAULT
@@ -4049,8 +4070,8 @@ async def get_binance_open_positions(
             elif local_pos and local_pos.base_stop_loss_pct is not None:
                 base_sl_value = local_pos.base_stop_loss_pct
                 base_sl_source = "override"  # bot position 的設定也視為 override
-            elif TRAILING_CONFIG.base_sl_pct is not None:
-                base_sl_value = TRAILING_CONFIG.base_sl_pct
+            elif side_config.base_sl_pct is not None:
+                base_sl_value = side_config.base_sl_pct
                 base_sl_source = "global"
             else:
                 base_sl_value = DYN_BASE_SL_PCT
@@ -4480,7 +4501,9 @@ async def update_trailing_settings(
     # 如果 LONG 或 SHORT 的 lock_ratio 被更新，更新對應的 OPEN 倉位
     for side_name, side_key, old_ratio in [("LONG", "long_config", old_lock_ratio_long), 
                                            ("SHORT", "short_config", old_lock_ratio_short)]:
-        side_config_updated = "long_config" in data or "short_config" in data
+        # 只檢查對應的 side_config 是否被更新
+        side_config_key = f"{side_key}"
+        side_config_updated = side_config_key in data
         new_ratio = getattr(TRAILING_CONFIG, side_key).lock_ratio
         
         if side_config_updated and old_ratio != new_ratio:
@@ -5469,14 +5492,17 @@ async def update_position_stop_config(
     # 計算實際使用的值和來源標記（與 get_positions 中的邏輯一致）
     pos_dict = position.to_dict()
     
+    # 取得對應方向的全局設定
+    side_config = TRAILING_CONFIG.get_config_for_side(position.side)
+    
     # Profit Threshold
     profit_threshold_value = None
     profit_threshold_source = None
     if position.dyn_profit_threshold_pct is not None:
         profit_threshold_value = position.dyn_profit_threshold_pct
         profit_threshold_source = "override"
-    elif TRAILING_CONFIG.profit_threshold_pct is not None:
-        profit_threshold_value = TRAILING_CONFIG.profit_threshold_pct
+    elif side_config.profit_threshold_pct is not None:
+        profit_threshold_value = side_config.profit_threshold_pct
         profit_threshold_source = "global"
     else:
         profit_threshold_value = DYN_PROFIT_THRESHOLD_PCT
@@ -5488,8 +5514,8 @@ async def update_position_stop_config(
     if position.trail_callback is not None:
         lock_ratio_value = position.trail_callback
         lock_ratio_source = "override"
-    elif TRAILING_CONFIG.lock_ratio is not None:
-        lock_ratio_value = TRAILING_CONFIG.lock_ratio
+    elif side_config.lock_ratio is not None:
+        lock_ratio_value = side_config.lock_ratio
         lock_ratio_source = "global"
     else:
         lock_ratio_value = DYN_LOCK_RATIO_DEFAULT
@@ -5501,8 +5527,8 @@ async def update_position_stop_config(
     if position.base_stop_loss_pct is not None:
         base_sl_value = position.base_stop_loss_pct
         base_sl_source = "override"
-    elif TRAILING_CONFIG.base_sl_pct is not None:
-        base_sl_value = TRAILING_CONFIG.base_sl_pct
+    elif side_config.base_sl_pct is not None:
+        base_sl_value = side_config.base_sl_pct
         base_sl_source = "global"
     else:
         base_sl_value = DYN_BASE_SL_PCT
@@ -5719,6 +5745,9 @@ async def update_binance_position_stop_config(
     finally:
         db.close()
     
+    # 取得對應方向的全局設定
+    side_config = TRAILING_CONFIG.get_config_for_side(update.position_side.upper())
+    
     # Profit Threshold
     profit_threshold_value = None
     profit_threshold_source = None
@@ -5728,8 +5757,8 @@ async def update_binance_position_stop_config(
     elif local_pos and local_pos.dyn_profit_threshold_pct is not None:
         profit_threshold_value = local_pos.dyn_profit_threshold_pct
         profit_threshold_source = "override"
-    elif TRAILING_CONFIG.profit_threshold_pct is not None:
-        profit_threshold_value = TRAILING_CONFIG.profit_threshold_pct
+    elif side_config.profit_threshold_pct is not None:
+        profit_threshold_value = side_config.profit_threshold_pct
         profit_threshold_source = "global"
     else:
         profit_threshold_value = DYN_PROFIT_THRESHOLD_PCT
@@ -5744,8 +5773,8 @@ async def update_binance_position_stop_config(
     elif local_pos and local_pos.trail_callback is not None:
         lock_ratio_value = local_pos.trail_callback
         lock_ratio_source = "override"
-    elif TRAILING_CONFIG.lock_ratio is not None:
-        lock_ratio_value = TRAILING_CONFIG.lock_ratio
+    elif side_config.lock_ratio is not None:
+        lock_ratio_value = side_config.lock_ratio
         lock_ratio_source = "global"
     else:
         lock_ratio_value = DYN_LOCK_RATIO_DEFAULT
@@ -5760,8 +5789,8 @@ async def update_binance_position_stop_config(
     elif local_pos and local_pos.base_stop_loss_pct is not None:
         base_sl_value = local_pos.base_stop_loss_pct
         base_sl_source = "override"
-    elif TRAILING_CONFIG.base_sl_pct is not None:
-        base_sl_value = TRAILING_CONFIG.base_sl_pct
+    elif side_config.base_sl_pct is not None:
+        base_sl_value = side_config.base_sl_pct
         base_sl_source = "global"
     else:
         base_sl_value = DYN_BASE_SL_PCT
