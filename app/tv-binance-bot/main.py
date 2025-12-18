@@ -5147,11 +5147,22 @@ async def update_bot(
     update_data = bot_update.model_dump(exclude_unset=True) if hasattr(bot_update, 'model_dump') else bot_update.dict(exclude_unset=True)
     
     # 驗證：如果更新 max_invest_usdt，需要檢查密碼
-    if "max_invest_usdt" in update_data and update_data["max_invest_usdt"] is not None:
-        # 檢查是否真的改變了（如果是新值與舊值相同，不需要密碼）
-        old_max_invest = bot.max_invest_usdt
+    if "max_invest_usdt" in update_data:
         new_max_invest = update_data["max_invest_usdt"]
-        if old_max_invest != new_max_invest:
+        old_max_invest = bot.max_invest_usdt
+        
+        # 檢查是否真的改變了（如果是新值與舊值相同，不需要密碼）
+        # 處理 None/null 和數值比較
+        has_changed = False
+        if old_max_invest is None and new_max_invest is not None:
+            has_changed = True
+        elif old_max_invest is not None and new_max_invest is None:
+            has_changed = True
+        elif old_max_invest is not None and new_max_invest is not None:
+            # 數值比較，使用小的容差值來處理浮點數精度問題
+            has_changed = abs(float(old_max_invest) - float(new_max_invest)) > 0.0001
+        
+        if has_changed:
             # max_invest_usdt 被改變了，需要密碼驗證
             required_password = os.getenv("MAX_INVEST_PASSWORD", "")
             if not required_password:
@@ -5165,7 +5176,7 @@ async def update_bot(
                         detail="更新 Max Invest USDT 需要密碼驗證，密碼不正確"
                     )
         
-        if update_data["max_invest_usdt"] <= 0:
+        if new_max_invest is not None and new_max_invest <= 0:
             raise HTTPException(status_code=400, detail="max_invest_usdt 必須大於 0")
     if "qty" in update_data and update_data["qty"] is not None and update_data["qty"] <= 0:
         raise HTTPException(status_code=400, detail="qty 必須大於 0（當 max_invest_usdt 未設定時）")

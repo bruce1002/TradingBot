@@ -2715,18 +2715,27 @@ async function onSubmitBotForm(event) {
     // 先獲取當前 bot 的 max_invest_usdt 值來比較（從已載入的 bot 列表中）
     const botsList = await fetch("/bots").then(r => r.ok ? r.json() : []).catch(() => []);
     const currentBot = botsList.find(b => b.id === currentEditingBotId);
-    if (currentBot && currentBot.max_invest_usdt !== maxInvestUsdt) {
-      // max_invest_usdt 被改變了，需要密碼
-      const password = prompt("請輸入密碼以更新 Max Invest USDT:");
-      if (password === null) {
-        // 用戶取消
-        return;
+    if (currentBot) {
+      // 正確比較 max_invest_usdt（處理 null 值的情況）
+      const oldMaxInvest = currentBot.max_invest_usdt;
+      const newMaxInvest = maxInvestUsdt;
+      const hasChanged = (oldMaxInvest === null && newMaxInvest !== null) ||
+                        (oldMaxInvest !== null && newMaxInvest === null) ||
+                        (oldMaxInvest !== null && newMaxInvest !== null && Math.abs(oldMaxInvest - newMaxInvest) > 0.0001);
+      
+      if (hasChanged) {
+        // max_invest_usdt 被改變了，需要密碼
+        const password = prompt("請輸入密碼以更新 Max Invest USDT:");
+        if (password === null) {
+          // 用戶取消
+          return;
+        }
+        if (!password || password.trim() === "") {
+          showBotFormError("密碼不能為空");
+          return;
+        }
+        payload.max_invest_password = password.trim();
       }
-      if (!password || password.trim() === "") {
-        showBotFormError("密碼不能為空");
-        return;
-      }
-      payload.max_invest_password = password.trim();
     }
     
     // 編輯模式：直接提交
@@ -2894,9 +2903,18 @@ async function submitBotPayload(payload, formElement) {
     }
 
     if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}));
-      const detail = data.detail || `${currentEditingBotId ? 'Update' : 'Create'} bot failed: HTTP ${resp.status}`;
-      showBotFormError(detail);
+      let errorMessage = `${currentEditingBotId ? 'Update' : 'Create'} bot failed: HTTP ${resp.status}`;
+      try {
+        const data = await resp.json();
+        errorMessage = data.detail || data.message || errorMessage;
+      } catch (e) {
+        // 如果無法解析 JSON，使用預設錯誤訊息
+        const text = await resp.text().catch(() => "");
+        if (text) {
+          errorMessage = text;
+        }
+      }
+      showBotFormError(errorMessage);
       submitBtn.disabled = false;
       submitBtn.textContent = originalText;
       return;
@@ -2911,7 +2929,8 @@ async function submitBotPayload(payload, formElement) {
     alert(`Bot ${currentEditingBotId ? '更新' : '建立'}成功！`);
   } catch (e) {
     console.error(`${currentEditingBotId ? 'Update' : 'Create'} bot error:`, e);
-    showBotFormError(`${currentEditingBotId ? 'Update' : 'Create'} bot failed: ${e.message}`);
+    const errorMessage = e.message || String(e) || `${currentEditingBotId ? 'Update' : 'Create'} bot failed`;
+    showBotFormError(errorMessage);
     const submitBtn = formElement.querySelector('button[type="submit"]');
     if (submitBtn) {
       submitBtn.disabled = false;
