@@ -41,7 +41,7 @@ def init_db():
     建議在應用程式啟動時呼叫此函數。
     """
     # 匯入所有模型，確保 Base.metadata 包含所有表定義
-    from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig, PortfolioTrailingConfig  # noqa: F401
+    from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig, PortfolioTrailingConfig, SymbolLock  # noqa: F401
     
     # 建立所有資料表
     Base.metadata.create_all(bind=engine)

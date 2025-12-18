@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from db import init_db, get_db, SessionLocal
-from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig, PortfolioTrailingConfig
+from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig, PortfolioTrailingConfig, SymbolLock
 from binance_client import (
     get_client, 
     get_mark_price, 
@@ -42,6 +42,12 @@ from binance_client import (
     get_symbol_info,
     update_all_bots_invest_amount,
     format_quantity
+)
+from symbol_lock import (
+    guard_single_bot_per_symbol,
+    acquire_lock_after_successful_open,
+    release_lock_if_fully_closed,
+    EPS
 )
 
 # 設定日誌
@@ -1360,6 +1366,9 @@ async def check_trailing_stop(position: Position, db: Session):
                     position.exit_reason = "dynamic_stop" if mode == "dynamic_trailing" else "base_stop"
                     db.commit()
                     
+                    # Release lock if position is fully closed (non-system locks only)
+                    release_lock_if_fully_closed(db, position.symbol)
+                    
                     logger.info(
                         f"倉位 {position.id} ({position.symbol}) LONG 已成功關倉（{mode}），"
                         f"訂單 ID: {close_order.get('orderId')}, 平倉價格: {exit_price}"
@@ -1481,6 +1490,9 @@ async def check_trailing_stop(position: Position, db: Session):
                     position.exit_price = exit_price
                     position.exit_reason = "dynamic_stop" if mode == "dynamic_trailing" else "base_stop"
                     db.commit()
+                    
+                    # Release lock if position is fully closed (non-system locks only)
+                    release_lock_if_fully_closed(db, position.symbol)
                     
                     logger.info(
                         f"倉位 {position.id} ({position.symbol}) SHORT 已成功關倉（{mode}），"
@@ -2545,6 +2557,44 @@ async def webhook_tradingview(
                     if side not in ["BUY", "SELL"]:
                         raise ValueError(f"無效的下單方向: {side}")
                     
+                    # Single-bot-per-symbol guard: Order-based mode is always an "open" intent
+                    try:
+                        allowed, owner_bot_id, reason = guard_single_bot_per_symbol(
+                            db=db,
+                            symbol=symbol,
+                            requested_bot_id=bot.id,
+                            intent="open",
+                            signal_key=signal.signal_key if use_signal_key else None
+                        )
+                        if not allowed:
+                            error_detail = {
+                                "ok": False,
+                                "error": "symbol_locked_single_bot",
+                                "symbol": symbol,
+                                "owner_bot_id": owner_bot_id or 0,
+                                "requested_bot_id": bot.id,
+                                "reason": reason or "unknown"
+                            }
+                            log.processed = True
+                            log.process_result = f"blocked_by_symbol_lock: owner={owner_bot_id}, reason={reason}"
+                            db.commit()
+                            logger.warning(
+                                f"Bot {bot.id} ({bot.name}) blocked from opening {symbol}: "
+                                f"owner_bot_id={owner_bot_id}, reason={reason}, signal_key={signal.signal_key if use_signal_key else None}"
+                            )
+                            results.append(f"bot={bot.id}, error=symbol_locked, owner={owner_bot_id}, reason={reason}")
+                            continue  # Skip this bot, continue with others
+                    except Exception as guard_error:
+                        # Binance query failed - return 503
+                        logger.error(f"Guard check failed for Bot {bot.id} symbol {symbol}: {guard_error}")
+                        log.processed = True
+                        log.process_result = f"guard_check_failed: {str(guard_error)}"
+                        db.commit()
+                        raise HTTPException(
+                            status_code=503,
+                            detail=f"無法驗證 symbol {symbol} 的狀態，請稍後再試"
+                        )
+                    
                     # 計算 qty：使用 bot 設定（max_invest_usdt 或 qty）
                     # 如果設定了 max_invest_usdt，則根據當前價格計算；否則使用 bot.qty
                     qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
@@ -2632,6 +2682,9 @@ async def webhook_tradingview(
                     db.commit()
                     db.refresh(position)
                     
+                    # Acquire lock after successful open
+                    acquire_lock_after_successful_open(db, symbol, bot.id)
+                    
                     results.append(f"bot={bot.id}, position_id={position.id}, mode=order_based")
                     logger.info(f"Bot {bot.id} 成功建立 Position {position.id} (訂單導向)")
                     
@@ -2643,6 +2696,57 @@ async def webhook_tradingview(
                     
                     # 取得當前倉位
                     current_position, current_qty_signed = get_current_position_signed_qty(db, bot.id, symbol)
+                    
+                    # Determine intent for guard check
+                    intent = "close" if abs(target_position_size) < EPS else "open"
+                    
+                    # Single-bot-per-symbol guard check
+                    try:
+                        allowed, owner_bot_id, reason = guard_single_bot_per_symbol(
+                            db=db,
+                            symbol=symbol,
+                            requested_bot_id=bot.id,
+                            intent=intent,
+                            signal_key=signal.signal_key if use_signal_key else None
+                        )
+                        if not allowed:
+                            error_detail = {
+                                "ok": False,
+                                "error": "symbol_locked_single_bot",
+                                "symbol": symbol,
+                                "owner_bot_id": owner_bot_id or 0,
+                                "requested_bot_id": bot.id,
+                                "reason": reason or "unknown"
+                            }
+                            log.processed = True
+                            log.process_result = f"blocked_by_symbol_lock: owner={owner_bot_id}, reason={reason}"
+                            db.commit()
+                            logger.warning(
+                                f"Bot {bot.id} ({bot.name}) blocked from {intent} on {symbol}: "
+                                f"owner_bot_id={owner_bot_id}, reason={reason}, signal_key={signal.signal_key if use_signal_key else None}"
+                            )
+                            results.append(f"bot={bot.id}, error=symbol_locked, owner={owner_bot_id}, reason={reason}")
+                            continue  # Skip this bot, continue with others
+                    except Exception as guard_error:
+                        # Binance query failed - for OPEN/INCREASE return 503, for CLOSE allow if DB confirms
+                        if intent == "close":
+                            # For close, allow if we can verify via DB
+                            if current_position is None:
+                                # No DB position either, allow but log
+                                logger.warning(f"Guard check failed for close on {symbol}, but no DB position found, allowing")
+                            else:
+                                # DB confirms position exists, allow
+                                logger.warning(f"Guard check failed for close on {symbol}, but DB confirms position, allowing")
+                        else:
+                            # OPEN/INCREASE intent failed guard check
+                            logger.error(f"Guard check failed for Bot {bot.id} symbol {symbol} (intent={intent}): {guard_error}")
+                            log.processed = True
+                            log.process_result = f"guard_check_failed: {str(guard_error)}"
+                            db.commit()
+                            raise HTTPException(
+                                status_code=503,
+                                detail=f"無法驗證 symbol {symbol} 的狀態，請稍後再試"
+                            )
                     
                     logger.info(
                         f"Bot {bot.id} ({bot.name}) 位置導向模式: "
@@ -2693,6 +2797,9 @@ async def webhook_tradingview(
                                         current_position.exit_price = exit_price
                                         current_position.exit_reason = "tv_exit"
                                         db.commit()
+                                        
+                                        # Release lock if position is fully closed (non-system locks only)
+                                        release_lock_if_fully_closed(db, symbol)
                                         
                                         results.append(f"bot={bot.id}, closed_position_id={current_position.id}")
                                         logger.info(f"Bot {bot.id} 成功平倉 Position {current_position.id}")
@@ -2778,6 +2885,9 @@ async def webhook_tradingview(
                                         db.commit()
                                         db.refresh(position)
                                         
+                                        # Acquire lock after successful open
+                                        acquire_lock_after_successful_open(db, symbol, bot.id)
+                                        
                                         results.append(f"bot={bot.id}, position_id={position.id}, result=rebalance_long")
                                         logger.info(f"Bot {bot.id} 成功調整多倉至 {target_qty}")
                                     except Exception as e:
@@ -2848,6 +2958,9 @@ async def webhook_tradingview(
                                 db.commit()
                                 db.refresh(position)
                                 
+                                # Acquire lock after successful open
+                                acquire_lock_after_successful_open(db, symbol, bot.id)
+                                
                                 results.append(f"bot={bot.id}, position_id={position.id}, result=reverse_short_to_long")
                                 logger.info(f"Bot {bot.id} 成功反轉空倉為多倉 {target_qty}")
                             except Exception as e:
@@ -2895,6 +3008,9 @@ async def webhook_tradingview(
                                 db.add(position)
                                 db.commit()
                                 db.refresh(position)
+                                
+                                # Acquire lock after successful open
+                                acquire_lock_after_successful_open(db, symbol, bot.id)
                                 
                                 results.append(f"bot={bot.id}, position_id={position.id}, result=open_long")
                                 logger.info(f"Bot {bot.id} 成功開多倉 {target_qty}")
@@ -2976,6 +3092,9 @@ async def webhook_tradingview(
                                         db.commit()
                                         db.refresh(position)
                                         
+                                        # Acquire lock after successful open
+                                        acquire_lock_after_successful_open(db, symbol, bot.id)
+                                        
                                         results.append(f"bot={bot.id}, position_id={position.id}, result=rebalance_short")
                                         logger.info(f"Bot {bot.id} 成功調整空倉至 {target_qty}")
                                     except Exception as e:
@@ -3044,6 +3163,9 @@ async def webhook_tradingview(
                                 db.commit()
                                 db.refresh(position)
                                 
+                                # Acquire lock after successful open
+                                acquire_lock_after_successful_open(db, symbol, bot.id)
+                                
                                 results.append(f"bot={bot.id}, position_id={position.id}, result=reverse_long_to_short")
                                 logger.info(f"Bot {bot.id} 成功反轉多倉為空倉 {target_qty}")
                             except Exception as e:
@@ -3091,6 +3213,9 @@ async def webhook_tradingview(
                                 db.add(position)
                                 db.commit()
                                 db.refresh(position)
+                                
+                                # Acquire lock after successful open
+                                acquire_lock_after_successful_open(db, symbol, bot.id)
                                 
                                 results.append(f"bot={bot.id}, position_id={position.id}, result=open_short")
                                 logger.info(f"Bot {bot.id} 成功開空倉 {target_qty}")
@@ -6102,6 +6227,14 @@ async def close_all_binance_positions(
             if db_positions_to_update:
                 db.commit()
                 logger.info(f"成功更新 {updated_count} 筆 Position 記錄狀態為 CLOSED")
+                
+                # Release locks for all closed symbols (non-system locks only)
+                closed_symbols = set()
+                for update_info in db_positions_to_update:
+                    symbol = update_info["position"].symbol
+                    if symbol not in closed_symbols:
+                        release_lock_if_fully_closed(db, symbol)
+                        closed_symbols.add(symbol)
         except Exception as commit_error:
             logger.error(f"提交資料庫變更失敗: {commit_error}")
             db.rollback()
@@ -6363,6 +6496,9 @@ async def close_position(
         position.exit_price = exit_price
         position.exit_reason = "manual_close"
         db.commit()
+        
+        # Release lock if position is fully closed (non-system locks only)
+        release_lock_if_fully_closed(db, position.symbol)
         
         return {
             "success": True,
@@ -6651,6 +6787,180 @@ def clear_error_positions(
         "deleted": deleted_count,
         "message": f"成功清除 {deleted_count} 筆 ERROR 狀態的倉位"
     }
+
+
+# ==================== Admin Symbol Lock Management APIs ====================
+
+class SymbolLockOut(BaseModel):
+    """Symbol Lock 回應格式"""
+    symbol: str
+    owner_bot_id: int
+    reason: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class SymbolLockSetRequest(BaseModel):
+    """設定 Symbol Lock 的請求格式"""
+    owner_bot_id: int = Field(..., description="Bot ID 或 0 (系統鎖)")
+    reason: Optional[str] = Field(None, description="鎖定原因說明")
+
+
+@app.get("/admin/symbol-locks", response_model=dict)
+async def get_symbol_locks(
+    x_api_key: str = Header(..., alias="X-ADMIN-KEY"),
+    db: Session = Depends(get_db)
+):
+    """
+    取得所有 Symbol Locks 列表
+    
+    Auth required: header X-ADMIN-KEY: <ADMIN_API_KEY>
+    
+    Returns:
+        dict: {
+            "ok": true,
+            "locks": [
+                {
+                    "symbol": "...",
+                    "owner_bot_id": 1,
+                    "reason": "...",
+                    "created_at": "...",
+                    "updated_at": "..."
+                }
+            ]
+        }
+    """
+    # Verify API key
+    verify_admin_api_key(x_api_key)
+    
+    locks = db.query(SymbolLock).order_by(SymbolLock.symbol).all()
+    
+    locks_list = [
+        {
+            "symbol": lock.symbol,
+            "owner_bot_id": lock.owner_bot_id,
+            "reason": lock.reason,
+            "created_at": lock.created_at.isoformat() if lock.created_at else None,
+            "updated_at": lock.updated_at.isoformat() if lock.updated_at else None,
+        }
+        for lock in locks
+    ]
+    
+    logger.info(f"Admin API: Retrieved {len(locks_list)} symbol locks")
+    
+    return {
+        "ok": True,
+        "locks": locks_list
+    }
+
+
+@app.post("/admin/symbol-locks/{symbol}/clear")
+async def clear_symbol_lock_admin(
+    symbol: str,
+    x_api_key: str = Header(..., alias="X-ADMIN-KEY"),
+    x_confirm: Optional[str] = Header(None, alias="X-CONFIRM"),
+    db: Session = Depends(get_db)
+):
+    """
+    清除 Symbol Lock
+    
+    Auth required: header X-ADMIN-KEY: <ADMIN_API_KEY>
+    
+    For system locks (owner_bot_id=0), requires additional header:
+        X-CONFIRM: CLEAR_SYSTEM_LOCK
+    
+    Args:
+        symbol: Trading pair symbol
+        x_api_key: Admin API key from header
+        x_confirm: Optional confirmation header (required for system locks)
+        db: Database session
+    
+    Returns:
+        dict: {"ok": true, "message": "..."}
+    
+    Raises:
+        HTTPException: 400 if system lock requires confirmation, 404 if lock not found
+    """
+    # Verify API key
+    verify_admin_api_key(x_api_key)
+    
+    from symbol_lock import get_lock, clear_lock
+    
+    lock = get_lock(db, symbol)
+    if not lock:
+        raise HTTPException(status_code=404, detail=f"Lock for symbol {symbol} not found")
+    
+    # Check if system lock requires confirmation
+    if lock.owner_bot_id == 0:
+        if x_confirm != "CLEAR_SYSTEM_LOCK":
+            raise HTTPException(
+                status_code=400,
+                detail="System lock (owner_bot_id=0) requires confirmation header: X-CONFIRM: CLEAR_SYSTEM_LOCK"
+            )
+        logger.warning(f"Admin API: Clearing system lock for {symbol} (owner_bot_id=0) with confirmation")
+    else:
+        logger.info(f"Admin API: Clearing lock for {symbol} (owner_bot_id={lock.owner_bot_id})")
+    
+    clear_lock(db, symbol)
+    
+    return {
+        "ok": True,
+        "message": f"Lock for {symbol} cleared successfully"
+    }
+
+
+@app.post("/admin/symbol-locks/{symbol}/set", response_model=SymbolLockOut)
+async def set_symbol_lock_admin(
+    symbol: str,
+    request: SymbolLockSetRequest,
+    x_api_key: str = Header(..., alias="X-ADMIN-KEY"),
+    db: Session = Depends(get_db)
+):
+    """
+    設定 Symbol Lock
+    
+    Auth required: header X-ADMIN-KEY: <ADMIN_API_KEY>
+    
+    Creates or overwrites a lock for the symbol.
+    
+    Args:
+        symbol: Trading pair symbol
+        request: Lock configuration (owner_bot_id, reason)
+        x_api_key: Admin API key from header
+        db: Database session
+    
+    Returns:
+        SymbolLockOut: The created/updated lock record
+    
+    Raises:
+        HTTPException: 400 if owner_bot_id < 0
+    """
+    # Verify API key
+    verify_admin_api_key(x_api_key)
+    
+    from symbol_lock import set_lock
+    
+    if request.owner_bot_id < 0:
+        raise HTTPException(
+            status_code=400,
+            detail="owner_bot_id must be >= 0 (0 for system lock, >0 for bot ID)"
+        )
+    
+    reason = request.reason or f"Admin set lock: owner_bot_id={request.owner_bot_id}"
+    
+    lock = set_lock(db, symbol, request.owner_bot_id, reason)
+    
+    logger.info(
+        f"Admin API: Set lock for {symbol}: owner_bot_id={request.owner_bot_id}, reason={reason}"
+    )
+    
+    return SymbolLockOut(
+        symbol=lock.symbol,
+        owner_bot_id=lock.owner_bot_id,
+        reason=lock.reason,
+        created_at=lock.created_at.isoformat() if lock.created_at else "",
+        updated_at=lock.updated_at.isoformat() if lock.updated_at else ""
+    )
 
 
 # ==================== 主程式入口 ====================
