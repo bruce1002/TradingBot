@@ -4378,9 +4378,9 @@ async def update_trailing_settings(
     """
     global TRAILING_CONFIG
     
-    # 保存舊的 lock_ratio 值（用於更新使用舊全局值的倉位）- 使用 LONG 作為參考
-    old_lock_ratio_long = TRAILING_CONFIG.long_config.lock_ratio
-    old_lock_ratio_short = TRAILING_CONFIG.short_config.lock_ratio
+    # 保存舊的設定值（用於更新使用舊全局值的倉位）
+    old_long_config = TRAILING_CONFIG.long_config
+    old_short_config = TRAILING_CONFIG.short_config
     
     # 使用 dict() 方法（Pydantic v1/v2 兼容）
     if hasattr(TRAILING_CONFIG, 'model_dump'):
@@ -4497,52 +4497,87 @@ async def update_trailing_settings(
     # 重新建立 TrailingConfig 物件
     TRAILING_CONFIG = TrailingConfig(**updated)
     
-    # 處理 lock_ratio 更新後的倉位同步
-    # 如果 LONG 或 SHORT 的 lock_ratio 被更新，更新對應的 OPEN 倉位
-    for side_name, side_key, old_ratio in [("LONG", "long_config", old_lock_ratio_long), 
-                                           ("SHORT", "short_config", old_lock_ratio_short)]:
+    # 處理設定更新後的倉位同步
+    # 如果 LONG 或 SHORT 的設定被更新，清除對應 OPEN 倉位的覆寫值（讓它們使用新的全局配置）
+    for side_name, side_key, old_config in [("LONG", "long_config", old_long_config), 
+                                           ("SHORT", "short_config", old_short_config)]:
         # 只檢查對應的 side_config 是否被更新
         side_config_key = f"{side_key}"
         side_config_updated = side_config_key in data
-        new_ratio = getattr(TRAILING_CONFIG, side_key).lock_ratio
         
-        if side_config_updated and old_ratio != new_ratio:
-            try:
-                # 找出所有 OPEN 狀態、對應方向且 trail_callback 等於舊全局 lock_ratio 的倉位
-                if old_ratio is not None:
+        if side_config_updated:
+            new_config = getattr(TRAILING_CONFIG, side_key)
+            # 檢查哪些設定被改變
+            lock_ratio_changed = old_config.lock_ratio != new_config.lock_ratio
+            profit_threshold_changed = old_config.profit_threshold_pct != new_config.profit_threshold_pct
+            base_sl_changed = old_config.base_sl_pct != new_config.base_sl_pct
+            
+            if lock_ratio_changed or profit_threshold_changed or base_sl_changed:
+                try:
+                    # 找出所有 OPEN 狀態且對應方向的倉位
                     positions_to_update = (
                         db.query(Position)
                         .filter(
                             Position.status == "OPEN",
-                            Position.side == side_name,
-                            Position.trail_callback == old_ratio
+                            Position.side == side_name
                         )
                         .all()
                     )
-                else:
-                    positions_to_update = (
-                        db.query(Position)
-                        .filter(
-                            Position.status == "OPEN",
-                            Position.side == side_name,
-                            Position.trail_callback.is_(None)
-                        )
-                        .all()
-                    )
-                
-                if positions_to_update:
-                    for position in positions_to_update:
-                        position.trail_callback = new_ratio
-                        logger.info(
-                            f"更新倉位 {position.id} ({position.symbol}) {side_name} 的 lock_ratio: "
-                            f"{old_ratio} -> {new_ratio} (跟隨全局配置更新)"
-                        )
                     
-                    db.commit()
-                    logger.info(f"已更新 {len(positions_to_update)} 個 {side_name} OPEN 倉位的 lock_ratio 以匹配新的全局配置")
-            except Exception as e:
-                logger.error(f"更新 {side_name} 倉位的 lock_ratio 時發生錯誤: {e}", exc_info=True)
-                db.rollback()
+                    updated_count = 0
+                    for position in positions_to_update:
+                        updated = False
+                        
+                        # 當全局設定改變時，清除所有覆寫值，讓所有倉位使用新的全局配置
+                        # 這樣確保全局設定的更改會應用到所有 OPEN 倉位
+                        
+                        # 如果 lock_ratio 改變，清除所有覆寫值，讓倉位使用新的全局配置
+                        if lock_ratio_changed:
+                            if position.trail_callback is not None:  # 只清除有具體值的覆寫
+                                old_trail_callback = position.trail_callback
+                                position.trail_callback = None  # 清除覆寫，讓它使用新的全局配置
+                                updated = True
+                                logger.info(
+                                    f"清除倉位 {position.id} ({position.symbol}) {side_name} 的 trail_callback 覆寫 "
+                                    f"(舊覆寫值={old_trail_callback}，新全局值={new_config.lock_ratio})"
+                                )
+                        
+                        # 如果 profit_threshold 改變，清除所有覆寫值
+                        if profit_threshold_changed:
+                            if position.dyn_profit_threshold_pct is not None:  # 只清除有具體值的覆寫
+                                old_profit_threshold = position.dyn_profit_threshold_pct
+                                position.dyn_profit_threshold_pct = None  # 清除覆寫
+                                updated = True
+                                logger.info(
+                                    f"清除倉位 {position.id} ({position.symbol}) {side_name} 的 dyn_profit_threshold_pct 覆寫 "
+                                    f"(舊覆寫值={old_profit_threshold}，新全局值={new_config.profit_threshold_pct})"
+                                )
+                        
+                        # 如果 base_sl 改變，清除所有覆寫值
+                        if base_sl_changed:
+                            if position.base_stop_loss_pct is not None:  # 只清除有具體值的覆寫
+                                old_base_sl = position.base_stop_loss_pct
+                                position.base_stop_loss_pct = None  # 清除覆寫
+                                updated = True
+                                logger.info(
+                                    f"清除倉位 {position.id} ({position.symbol}) {side_name} 的 base_stop_loss_pct 覆寫 "
+                                    f"(舊覆寫值={old_base_sl}，新全局值={new_config.base_sl_pct})"
+                                )
+                        
+                        if updated:
+                            updated_count += 1
+                    
+                    if updated_count > 0:
+                        db.commit()
+                        logger.info(
+                            f"已清除 {updated_count} 個 {side_name} OPEN 倉位的覆寫值，讓它們使用新的全局配置 "
+                            f"(lock_ratio: {old_config.lock_ratio}->{new_config.lock_ratio}, "
+                            f"profit_threshold: {old_config.profit_threshold_pct}->{new_config.profit_threshold_pct}, "
+                            f"base_sl: {old_config.base_sl_pct}->{new_config.base_sl_pct})"
+                        )
+                except Exception as e:
+                    logger.error(f"更新 {side_name} 倉位的覆寫值時發生錯誤: {e}", exc_info=True)
+                    db.rollback()
     
     # 使用兼容的序列化方法
     if hasattr(TRAILING_CONFIG, 'model_dump_json'):
