@@ -928,20 +928,35 @@ async function loadTrailingSettings() {
 
 // 儲存 Trailing 設定
 async function saveTrailingSettings() {
+  // 輔助函數：解析數值，空值或無效值返回 null
+  const parseValue = (value) => {
+    const trimmed = String(value).trim();
+    if (!trimmed || trimmed === "") return null;
+    const parsed = parseFloat(trimmed);
+    return isNaN(parsed) ? null : parsed;
+  };
+
   const payload = {
     trailing_enabled: true,  // Always enabled
     long_config: {
-      profit_threshold_pct: parseFloat(document.getElementById("profit-threshold-long").value),
-      lock_ratio: parseFloat(document.getElementById("lock-ratio-long").value),
-      base_sl_pct: parseFloat(document.getElementById("base-sl-long").value),
+      profit_threshold_pct: parseValue(document.getElementById("profit-threshold-long")?.value),
+      lock_ratio: parseValue(document.getElementById("lock-ratio-long")?.value),
+      base_sl_pct: parseValue(document.getElementById("base-sl-long")?.value),
     },
     short_config: {
-      profit_threshold_pct: parseFloat(document.getElementById("profit-threshold-short").value),
-      lock_ratio: parseFloat(document.getElementById("lock-ratio-short").value),
-      base_sl_pct: parseFloat(document.getElementById("base-sl-short").value),
+      profit_threshold_pct: parseValue(document.getElementById("profit-threshold-short")?.value),
+      lock_ratio: parseValue(document.getElementById("lock-ratio-short")?.value),
+      base_sl_pct: parseValue(document.getElementById("base-sl-short")?.value),
     },
     auto_close_enabled: true,  // Always enabled
   };
+
+  const btn = document.getElementById("save-trailing-settings");
+  const originalText = btn?.textContent || "Save";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "儲存中...";
+  }
 
   try {
     const resp = await fetch("/settings/trailing", {
@@ -950,16 +965,32 @@ async function saveTrailingSettings() {
       body: JSON.stringify(payload),
     });
 
-    if (await handleFetchError(resp)) return;
+    if (await handleFetchError(resp)) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+      return;
+    }
 
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${resp.status}`);
+      throw new Error(err.detail || `HTTP ${resp.status}: ${resp.statusText}`);
     }
 
+    const result = await resp.json();
     alert("Trailing 設定已更新");
+    
+    // 重新載入設定以確保顯示最新值
+    await loadTrailingSettings();
   } catch (err) {
-    alert(`更新失敗：${err.message}`);
+    console.error("儲存 Trailing 設定失敗:", err);
+    alert(`更新失敗：${err.message || String(err)}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   }
 }
 
