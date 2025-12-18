@@ -2428,6 +2428,25 @@ async function bulkUpdateInvestAmount() {
     return;
   }
   
+  // 提示輸入密碼
+  const password = prompt("請輸入密碼以更新 Max Invest USDT:");
+  if (password === null) {
+    // 用戶取消
+    console.log("User cancelled password entry");
+    return;
+  }
+  if (!password || password.trim() === "") {
+    resultDiv.style.display = "block";
+    resultDiv.style.backgroundColor = "#ff6b6b";
+    resultDiv.style.color = "#fff";
+    resultDiv.style.border = "1px solid #ff6b6b";
+    resultDiv.textContent = "密碼不能為空";
+    setTimeout(() => {
+      resultDiv.style.display = "none";
+    }, 5000);
+    return;
+  }
+  
   // 設置按鈕為載入狀態
   btn.disabled = true;
   btn.textContent = "更新中...";
@@ -2440,13 +2459,24 @@ async function bulkUpdateInvestAmount() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        max_invest_usdt: maxInvestUsdt
+        max_invest_usdt: maxInvestUsdt,
+        max_invest_password: password.trim()
       }),
     });
     
     if (!resp.ok) {
-      const errorData = await resp.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP ${resp.status}`);
+      let errorMessage = `HTTP ${resp.status}`;
+      try {
+        const errorData = await resp.json();
+        errorMessage = errorData.detail || errorData.message || errorMessage;
+      } catch (e) {
+        // 如果無法解析 JSON，嘗試讀取文本
+        const text = await resp.text().catch(() => "");
+        if (text) {
+          errorMessage = text;
+        }
+      }
+      throw new Error(errorMessage);
     }
     
     const result = await resp.json();
@@ -2485,7 +2515,9 @@ async function bulkUpdateInvestAmount() {
     resultDiv.style.backgroundColor = "#ff6b6b";
     resultDiv.style.color = "#fff";
     resultDiv.style.border = "1px solid #ff6b6b";
-    resultDiv.textContent = `更新失敗：${error.message}`;
+    // 正確提取錯誤訊息
+    const errorMessage = error.message || String(error) || "未知錯誤";
+    resultDiv.textContent = `批量更新失敗：${errorMessage}`;
     setTimeout(() => {
       resultDiv.style.display = "none";
     }, 5000);
