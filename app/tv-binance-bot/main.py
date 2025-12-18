@@ -2604,14 +2604,12 @@ async def webhook_tradingview(
                     
                     position_side = "LONG" if side == "BUY" else "SHORT"
                     
-                    # 設定 trail_callback（使用對應方向的全局設定）
+                    # 設定 trail_callback（只使用 bot 的覆寫值，否則設為 None 以使用全局配置動態）
                     trail_callback = None
                     if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                        # Bot 有明確的覆寫值，使用它
                         trail_callback = bot.trailing_callback_percent / 100.0
-                    elif TRAILING_CONFIG.trailing_enabled:
-                        side_config = TRAILING_CONFIG.get_config_for_side(position_side)
-                        if side_config.lock_ratio:
-                            trail_callback = side_config.lock_ratio
+                    # 否則設為 None，讓位置使用全局配置動態（不儲存全局值作為覆寫）
                     
                     # 建立 Position 記錄
                     position = Position(
@@ -2754,13 +2752,11 @@ async def webhook_tradingview(
                                         
                                         entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
                                         
+                                        # 設定 trail_callback（只使用 bot 的覆寫值，否則設為 None 以使用全局配置動態）
                                         trail_callback = None
                                         if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                             trail_callback = bot.trailing_callback_percent / 100.0
-                                        elif TRAILING_CONFIG.trailing_enabled:
-                                            side_config = TRAILING_CONFIG.get_config_for_side("LONG")
-                                            if side_config.lock_ratio:
-                                                trail_callback = side_config.lock_ratio
+                                        # 否則設為 None，讓位置使用全局配置動態（不儲存全局值作為覆寫）
                                         
                                         position = Position(
                                             bot_id=bot.id,
@@ -2826,13 +2822,11 @@ async def webhook_tradingview(
                                 
                                 entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
                                 
+                                # 設定 trail_callback（只使用 bot 的覆寫值，否則設為 None 以使用全局配置動態）
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled:
-                                    side_config = TRAILING_CONFIG.get_config_for_side("LONG")
-                                    if side_config.lock_ratio:
-                                        trail_callback = side_config.lock_ratio
+                                # 否則設為 None，讓位置使用全局配置動態（不儲存全局值作為覆寫）
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -2876,13 +2870,11 @@ async def webhook_tradingview(
                                 
                                 entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
                                 
+                                # 設定 trail_callback（只使用 bot 的覆寫值，否則設為 None 以使用全局配置動態）
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled:
-                                    side_config = TRAILING_CONFIG.get_config_for_side("LONG")
-                                    if side_config.lock_ratio:
-                                        trail_callback = side_config.lock_ratio
+                                # 否則設為 None，讓位置使用全局配置動態（不儲存全局值作為覆寫）
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -2958,13 +2950,11 @@ async def webhook_tradingview(
                                         
                                         entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
                                         
+                                        # 設定 trail_callback（只使用 bot 的覆寫值，否則設為 None 以使用全局配置動態）
                                         trail_callback = None
                                         if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                             trail_callback = bot.trailing_callback_percent / 100.0
-                                        elif TRAILING_CONFIG.trailing_enabled:
-                                            side_config = TRAILING_CONFIG.get_config_for_side("SHORT")
-                                            if side_config.lock_ratio:
-                                                trail_callback = side_config.lock_ratio
+                                        # 否則設為 None，讓位置使用全局配置動態（不儲存全局值作為覆寫）
                                         
                                         position = Position(
                                             bot_id=bot.id,
@@ -3028,13 +3018,11 @@ async def webhook_tradingview(
                                 
                                 entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
                                 
+                                # 設定 trail_callback（只使用 bot 的覆寫值，否則設為 None 以使用全局配置動態）
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled:
-                                    side_config = TRAILING_CONFIG.get_config_for_side("SHORT")
-                                    if side_config.lock_ratio:
-                                        trail_callback = side_config.lock_ratio
+                                # 否則設為 None，讓位置使用全局配置動態（不儲存全局值作為覆寫）
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -3078,13 +3066,11 @@ async def webhook_tradingview(
                                 
                                 entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
                                 
+                                # 設定 trail_callback（只使用 bot 的覆寫值，否則設為 None 以使用全局配置動態）
                                 trail_callback = None
                                 if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
                                     trail_callback = bot.trailing_callback_percent / 100.0
-                                elif TRAILING_CONFIG.trailing_enabled:
-                                    side_config = TRAILING_CONFIG.get_config_for_side("SHORT")
-                                    if side_config.lock_ratio:
-                                        trail_callback = side_config.lock_ratio
+                                # 否則設為 None，讓位置使用全局配置動態（不儲存全局值作為覆寫）
                                 
                                 position = Position(
                                     bot_id=bot.id,
@@ -4498,21 +4484,25 @@ async def update_trailing_settings(
     TRAILING_CONFIG = TrailingConfig(**updated)
     
     # 處理設定更新後的倉位同步
-    # 如果 LONG 或 SHORT 的設定被更新，清除對應 OPEN 倉位的覆寫值（讓它們使用新的全局配置）
+    # 當任何 LONG 或 SHORT 設定被更新時，清除對應 OPEN 倉位的所有覆寫值（讓它們使用新的全局配置）
     for side_name, side_key, old_config in [("LONG", "long_config", old_long_config), 
                                            ("SHORT", "short_config", old_short_config)]:
-        # 只檢查對應的 side_config 是否被更新
+        # 檢查該 side_config 是否在更新數據中（表示用戶更新了這個方向的設定）
         side_config_key = f"{side_key}"
         side_config_updated = side_config_key in data
         
         if side_config_updated:
+            # 獲取更新後的配置
             new_config = getattr(TRAILING_CONFIG, side_key)
-            # 檢查哪些設定被改變
-            lock_ratio_changed = old_config.lock_ratio != new_config.lock_ratio
-            profit_threshold_changed = old_config.profit_threshold_pct != new_config.profit_threshold_pct
-            base_sl_changed = old_config.base_sl_pct != new_config.base_sl_pct
             
-            if lock_ratio_changed or profit_threshold_changed or base_sl_changed:
+            # 檢查是否有任何設定被改變
+            config_changed = (
+                old_config.lock_ratio != new_config.lock_ratio or
+                old_config.profit_threshold_pct != new_config.profit_threshold_pct or
+                old_config.base_sl_pct != new_config.base_sl_pct
+            )
+            
+            if config_changed:
                 try:
                     # 找出所有 OPEN 狀態且對應方向的倉位
                     positions_to_update = (
@@ -4524,59 +4514,42 @@ async def update_trailing_settings(
                         .all()
                     )
                     
-                    updated_count = 0
-                    for position in positions_to_update:
-                        updated = False
+                    if positions_to_update:
+                        cleared_trail_callback = 0
+                        cleared_profit_threshold = 0
+                        cleared_base_sl = 0
                         
-                        # 當全局設定改變時，清除所有覆寫值，讓所有倉位使用新的全局配置
-                        # 這樣確保全局設定的更改會應用到所有 OPEN 倉位
+                        for position in positions_to_update:
+                            # 清除所有覆寫值，讓倉位使用新的全局配置
+                            if position.trail_callback is not None:
+                                position.trail_callback = None
+                                cleared_trail_callback += 1
+                            
+                            if position.dyn_profit_threshold_pct is not None:
+                                position.dyn_profit_threshold_pct = None
+                                cleared_profit_threshold += 1
+                            
+                            if position.base_stop_loss_pct is not None:
+                                position.base_stop_loss_pct = None
+                                cleared_base_sl += 1
                         
-                        # 如果 lock_ratio 改變，清除所有覆寫值，讓倉位使用新的全局配置
-                        if lock_ratio_changed:
-                            if position.trail_callback is not None:  # 只清除有具體值的覆寫
-                                old_trail_callback = position.trail_callback
-                                position.trail_callback = None  # 清除覆寫，讓它使用新的全局配置
-                                updated = True
-                                logger.info(
-                                    f"清除倉位 {position.id} ({position.symbol}) {side_name} 的 trail_callback 覆寫 "
-                                    f"(舊覆寫值={old_trail_callback}，新全局值={new_config.lock_ratio})"
-                                )
-                        
-                        # 如果 profit_threshold 改變，清除所有覆寫值
-                        if profit_threshold_changed:
-                            if position.dyn_profit_threshold_pct is not None:  # 只清除有具體值的覆寫
-                                old_profit_threshold = position.dyn_profit_threshold_pct
-                                position.dyn_profit_threshold_pct = None  # 清除覆寫
-                                updated = True
-                                logger.info(
-                                    f"清除倉位 {position.id} ({position.symbol}) {side_name} 的 dyn_profit_threshold_pct 覆寫 "
-                                    f"(舊覆寫值={old_profit_threshold}，新全局值={new_config.profit_threshold_pct})"
-                                )
-                        
-                        # 如果 base_sl 改變，清除所有覆寫值
-                        if base_sl_changed:
-                            if position.base_stop_loss_pct is not None:  # 只清除有具體值的覆寫
-                                old_base_sl = position.base_stop_loss_pct
-                                position.base_stop_loss_pct = None  # 清除覆寫
-                                updated = True
-                                logger.info(
-                                    f"清除倉位 {position.id} ({position.symbol}) {side_name} 的 base_stop_loss_pct 覆寫 "
-                                    f"(舊覆寫值={old_base_sl}，新全局值={new_config.base_sl_pct})"
-                                )
-                        
-                        if updated:
-                            updated_count += 1
-                    
-                    if updated_count > 0:
                         db.commit()
+                        
+                        changes = []
+                        if old_config.lock_ratio != new_config.lock_ratio:
+                            changes.append(f"lock_ratio: {old_config.lock_ratio}->{new_config.lock_ratio}")
+                        if old_config.profit_threshold_pct != new_config.profit_threshold_pct:
+                            changes.append(f"profit_threshold: {old_config.profit_threshold_pct}->{new_config.profit_threshold_pct}")
+                        if old_config.base_sl_pct != new_config.base_sl_pct:
+                            changes.append(f"base_sl: {old_config.base_sl_pct}->{new_config.base_sl_pct}")
+                        
                         logger.info(
-                            f"已清除 {updated_count} 個 {side_name} OPEN 倉位的覆寫值，讓它們使用新的全局配置 "
-                            f"(lock_ratio: {old_config.lock_ratio}->{new_config.lock_ratio}, "
-                            f"profit_threshold: {old_config.profit_threshold_pct}->{new_config.profit_threshold_pct}, "
-                            f"base_sl: {old_config.base_sl_pct}->{new_config.base_sl_pct})"
+                            f"已清除 {len(positions_to_update)} 個 {side_name} OPEN 倉位的覆寫值，讓它們使用新的全局配置 "
+                            f"(變更: {', '.join(changes)}；清除: trail_callback={cleared_trail_callback}, "
+                            f"dyn_profit_threshold_pct={cleared_profit_threshold}, base_stop_loss_pct={cleared_base_sl})"
                         )
                 except Exception as e:
-                    logger.error(f"更新 {side_name} 倉位的覆寫值時發生錯誤: {e}", exc_info=True)
+                    logger.error(f"清除 {side_name} 倉位的覆寫值時發生錯誤: {e}", exc_info=True)
                     db.rollback()
     
     # 使用兼容的序列化方法
