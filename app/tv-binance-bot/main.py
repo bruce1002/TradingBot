@@ -6107,12 +6107,16 @@ async def get_binance_portfolio_summary(
 
 @app.post("/binance/positions/close-all")
 async def close_all_binance_positions(
+    side: Optional[str] = Query(None, description="Position side to close: 'long', 'short', or None for all"),
     user: dict = Depends(require_admin_user),
     db: Session = Depends(get_db)
 ):
     """
-    關閉所有 Binance Live Positions。
+    關閉 Binance Live Positions（可選指定 LONG 或 SHORT）。
     僅限已登入的管理員使用。
+    
+    Args:
+        side: Position side ('long', 'short'), 如果為 None 則關閉所有倉位
     
     Returns:
         dict: {
@@ -6124,6 +6128,14 @@ async def close_all_binance_positions(
     Raises:
         HTTPException: 當 Binance API 呼叫失敗時
     """
+    # 驗證 side 參數
+    target_side = None
+    if side:
+        side_lower = side.lower()
+        if side_lower not in ["long", "short"]:
+            raise HTTPException(status_code=400, detail="side 必須是 'long' 或 'short'")
+        target_side = side_lower.upper()  # "LONG" or "SHORT"
+    
     try:
         client = get_client()
         raw_positions = client.futures_position_information()
@@ -6147,15 +6159,20 @@ async def close_all_binance_positions(
             
             position_side = "LONG" if position_amt > 0 else "SHORT"
             
+            # 如果指定了 side，只關閉該類別的倉位
+            if target_side and position_side != target_side:
+                continue
+            
             try:
                 # 使用現有的關倉邏輯
                 side = "SELL" if position_side == "LONG" else "BUY"
                 qty = abs(position_amt)
                 
                 timestamp = int(time.time() * 1000)
-                client_order_id = f"TVBOT_CLOSE_ALL_{timestamp}_{closed_count}"
+                side_prefix = target_side if target_side else "ALL"
+                client_order_id = f"TVBOT_CLOSE_{side_prefix}_{timestamp}_{closed_count}"
                 
-                logger.info(f"關閉所有倉位: {symbol} {position_side}，數量: {qty}")
+                logger.info(f"關閉{side_prefix if target_side else '所有'}倉位: {symbol} {position_side}，數量: {qty}")
                 
                 order = client.futures_create_order(
                     symbol=symbol,
@@ -6210,7 +6227,8 @@ async def close_all_binance_positions(
                 db_position.status = "CLOSED"
                 db_position.closed_at = datetime.now(timezone.utc)
                 db_position.exit_price = exit_price
-                db_position.exit_reason = "manual_close_all"
+                exit_reason = f"manual_close_{target_side.lower()}" if target_side else "manual_close_all"
+                db_position.exit_reason = exit_reason
                 # 更新訂單 ID（如果可用）
                 if order.get("orderId"):
                     try:

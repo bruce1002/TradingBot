@@ -1678,27 +1678,38 @@ window.openBinanceStopConfigModal = openBinanceStopConfigModal;
 window.closeBinanceStopConfigModal = closeBinanceStopConfigModal;
 window.saveBinanceStopConfig = saveBinanceStopConfig;
 
-// 關閉所有 Binance Live Positions
-async function closeAllBinancePositions() {
-  if (!confirm("確定要關閉所有 Binance Live Positions 嗎？此操作無法撤銷。")) {
+// 關閉所有 Binance Live Positions (可選指定 side: "long", "short", 或 undefined 表示全部)
+async function closeAllBinancePositions(side) {
+  const sideName = side === "long" ? "LONG" : side === "short" ? "SHORT" : "所有";
+  if (!confirm(`確定要關閉${sideName} Binance Live Positions 嗎？此操作無法撤銷。`)) {
     return;
   }
 
-  const btn = document.getElementById("close-all-positions-btn");
+  const btnId = side === "long" ? "close-all-long-positions-btn" : 
+                side === "short" ? "close-all-short-positions-btn" : 
+                "close-all-positions-btn";
+  const btn = document.getElementById(btnId);
   if (btn) {
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = "關倉中...";
-    
+
     try {
-      const resp = await fetch("/binance/positions/close-all", {
+      const url = side ? `/binance/positions/close-all?side=${side}` : "/binance/positions/close-all";
+      const resp = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
       });
 
-      if (await handleFetchError(resp)) return;
+      if (await handleFetchError(resp)) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+        return;
+      }
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -1706,16 +1717,16 @@ async function closeAllBinancePositions() {
       }
 
       const result = await resp.json();
-      alert(`成功關閉 ${result.closed_count} 個倉位${result.errors && result.errors.length > 0 ? `\n錯誤: ${result.errors.join(", ")}` : ""}`);
+      alert(`成功關閉 ${result.closed_count} 個${sideName}倉位${result.errors && result.errors.length > 0 ? `\n錯誤: ${result.errors.join(", ")}` : ""}`);
 
       // 重新載入 Binance positions 和 summary
       await loadBinancePositions();
-      
+
       // 也重新載入 Bot Positions（因為可能更新了現有倉位）
       await loadPositions();
     } catch (error) {
-      console.error("關閉所有 Binance Positions 失敗:", error);
-      alert(`關閉失敗：${error.message}`);
+      console.error(`關閉${sideName} Binance Positions 失敗:`, error);
+      alert(`關閉失敗：${error.message || String(error)}`);
     } finally {
       if (btn) {
         btn.disabled = false;
@@ -4487,7 +4498,17 @@ document.addEventListener("DOMContentLoaded", function() {
   // 設定 Portfolio Controls 按鈕
   const closeAllBtn = document.getElementById("close-all-positions-btn");
   if (closeAllBtn) {
-    closeAllBtn.addEventListener("click", closeAllBinancePositions);
+    closeAllBtn.addEventListener("click", () => closeAllBinancePositions());
+  }
+
+  const closeAllLongBtn = document.getElementById("close-all-long-positions-btn");
+  if (closeAllLongBtn) {
+    closeAllLongBtn.addEventListener("click", closeAllLongPositions);
+  }
+
+  const closeAllShortBtn = document.getElementById("close-all-short-positions-btn");
+  if (closeAllShortBtn) {
+    closeAllShortBtn.addEventListener("click", closeAllShortPositions);
   }
   
   // LONG Portfolio Trailing Config buttons
