@@ -156,16 +156,15 @@
                 <div class="portfolio-controls" style="margin-bottom: 20px; padding: 20px; background: var(--card-bg, #1e1e1e); border-radius: 8px; border: 1px solid var(--border-color, #333);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3 style="margin: 0; color: var(--text-primary, #fff);">Portfolio Summary & Trailing Stop</h3>
-                        <div style="display: flex; gap: 8px;">
-                            <button id="close-all-long-positions-btn" class="btn-danger" style="padding: 8px 16px; background: var(--pnl-positive, #00ff88); color: #000; border: none;">Close All LONG</button>
-                            <button id="close-all-short-positions-btn" class="btn-danger" style="padding: 8px 16px; background: var(--pnl-negative, #ff4444); color: #fff; border: none;">Close All SHORT</button>
-                            <button id="close-all-positions-btn" class="btn-danger" style="padding: 8px 16px;">Close All Positions</button>
-                        </div>
+                        <button id="close-all-positions-btn" class="btn-danger" style="padding: 8px 16px;">Close All Positions</button>
                     </div>
                     
                     <!-- LONG Category -->
                     <div style="margin-bottom: 30px; padding: 15px; background: var(--card-bg, #252525); border-radius: 6px; border: 1px solid var(--border-color, #444);">
-                        <h4 style="margin: 0 0 15px 0; color: var(--pnl-positive, #00ff88);">LONG Positions</h4>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h4 style="margin: 0; color: var(--pnl-positive, #00ff88);">LONG Positions</h4>
+                            <button id="close-all-long-positions-btn" class="btn-danger" style="padding: 6px 12px; background: var(--pnl-positive, #00ff88); color: #000; border: none; font-size: 12px;">Close All LONG</button>
+                        </div>
                         
                         <!-- LONG Portfolio Summary -->
                         <div id="portfolio-summary-long" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
@@ -212,7 +211,10 @@
                     
                     <!-- SHORT Category -->
                     <div style="padding: 15px; background: var(--card-bg, #252525); border-radius: 6px; border: 1px solid var(--border-color, #444);">
-                        <h4 style="margin: 0 0 15px 0; color: var(--pnl-negative, #ff4444);">SHORT Positions</h4>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h4 style="margin: 0; color: var(--pnl-negative, #ff4444);">SHORT Positions</h4>
+                            <button id="close-all-short-positions-btn" class="btn-danger" style="padding: 6px 12px; background: var(--pnl-negative, #ff4444); color: #fff; border: none; font-size: 12px;">Close All SHORT</button>
+                        </div>
                         
                         <!-- SHORT Portfolio Summary -->
                         <div id="portfolio-summary-short" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
