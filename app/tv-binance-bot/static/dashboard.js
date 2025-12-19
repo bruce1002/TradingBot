@@ -1082,6 +1082,9 @@ async function loadPortfolioSummaryOnly() {
     
     // 注意：這裡不更新 Portfolio Trailing Stop 的配置輸入欄位
     // 讓用戶可以安心填寫配置而不會被自動刷新打斷
+    // 但是需要更新門檻顯示，因為倉位數量可能改變
+    updateThresholdDisplay("long");
+    updateThresholdDisplay("short");
   } catch (err) {
     console.error("loadPortfolioSummaryOnly error:", err);
   }
@@ -1157,6 +1160,9 @@ async function loadPortfolioSummary() {
         const lockRatio = longData.portfolio_trailing.lock_ratio;
         longLockRatioInput.value = (lockRatio !== null && lockRatio !== undefined) ? String(lockRatio) : "";
       }
+      
+      // Update threshold display after loading values
+      updateThresholdDisplay("long");
     }
     
     // 更新 SHORT Portfolio Summary
@@ -1212,11 +1218,36 @@ async function loadPortfolioSummary() {
         shortLockRatioInput.value = lockRatioValue;
         console.log(`[loadPortfolioSummary] SHORT lock_ratio set to: "${lockRatioValue}" (raw: ${lockRatio})`);
       }
+      
+      // Update threshold display after loading values
+      updateThresholdDisplay("short");
     } else {
       console.warn("[loadPortfolioSummary] shortData.portfolio_trailing is missing!");
     }
   } catch (err) {
     console.error("loadPortfolioSummary error:", err);
+  }
+}
+
+// 更新觸發門檻顯示（計算並顯示 實際觸發門檻 = target_pnl × position_count）
+function updateThresholdDisplay(side) {
+  const sideName = side === "long" ? "LONG" : "SHORT";
+  const thresholdDisplayEl = document.getElementById(`threshold-display-${side}`);
+  const targetPnlInput = document.getElementById(`portfolio-target-pnl-${side}`);
+  const positionCountEl = document.getElementById(`position-count-${side}`);
+  
+  if (!thresholdDisplayEl || !targetPnlInput || !positionCountEl) {
+    return;
+  }
+  
+  const targetPnl = parseFloat(targetPnlInput.value);
+  const positionCount = parseInt(positionCountEl.textContent) || 0;
+  
+  if (isNaN(targetPnl) || targetPnl <= 0) {
+    thresholdDisplayEl.textContent = "實際觸發門檻 = 此值 × 開啟倉位數量";
+  } else {
+    const threshold = targetPnl * positionCount;
+    thresholdDisplayEl.textContent = `實際觸發門檻 = ${targetPnl.toFixed(2)} × ${positionCount} = ${threshold.toFixed(2)} USDT`;
   }
 }
 
@@ -4581,6 +4612,13 @@ document.addEventListener("DOMContentLoaded", function() {
   } else {
     console.warn("[Event Listener] save-portfolio-trailing-btn-long not found!");
   }
+  
+  // Add event listeners for threshold calculation when input changes
+  const longTargetPnlInput = document.getElementById("portfolio-target-pnl-long");
+  if (longTargetPnlInput) {
+    longTargetPnlInput.addEventListener("input", () => updateThresholdDisplay("long"));
+    longTargetPnlInput.addEventListener("change", () => updateThresholdDisplay("long"));
+  }
 
   const resetMaxPnlBtnLong = document.getElementById("reset-max-pnl-btn-long");
   if (resetMaxPnlBtnLong) {
@@ -4597,6 +4635,13 @@ document.addEventListener("DOMContentLoaded", function() {
     });
   } else {
     console.warn("[Event Listener] save-portfolio-trailing-btn-short not found!");
+  }
+  
+  // Add event listeners for threshold calculation when input changes
+  const shortTargetPnlInput = document.getElementById("portfolio-target-pnl-short");
+  if (shortTargetPnlInput) {
+    shortTargetPnlInput.addEventListener("input", () => updateThresholdDisplay("short"));
+    shortTargetPnlInput.addEventListener("change", () => updateThresholdDisplay("short"));
   }
 
   const resetMaxPnlBtnShort = document.getElementById("reset-max-pnl-btn-short");
