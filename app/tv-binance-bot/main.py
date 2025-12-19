@@ -533,9 +533,13 @@ async def check_portfolio_trailing_stop(db: Session):
             if not symbol:
                 continue
             
+            # LONG: positionAmt > 0, SHORT: positionAmt < 0
             position_side = "LONG" if position_amt > 0 else "SHORT"
             
             try:
+                # Binance API 的 unRealizedProfit 已經正確計算：
+                # - LONG: 價格上漲時為正，價格下跌時為負
+                # - SHORT: 價格下跌時為正，價格上漲時為負
                 unrealized_pnl = float(item.get("unRealizedProfit", "0") or 0)
                 if position_side == "LONG":
                     long_positions.append(item)
@@ -546,17 +550,32 @@ async def check_portfolio_trailing_stop(db: Session):
             except (ValueError, TypeError):
                 continue
         
+        # 記錄總 PnL（用於調試）
+        logger.debug(
+            f"[Portfolio Trailing] 倉位統計: LONG={len(long_positions)} 個，總 PnL={long_total_pnl:.4f} USDT；"
+            f"SHORT={len(short_positions)} 個，總 PnL={short_total_pnl:.4f} USDT"
+        )
+        
         # 分別檢查 LONG 和 SHORT
         for side_name, config, positions_list, total_pnl in [
             ("LONG", long_config, long_positions, long_total_pnl),
             ("SHORT", short_config, short_positions, short_total_pnl)
         ]:
+            logger.debug(
+                f"[Portfolio Trailing {side_name}] 🔍 檢查開始: "
+                f"total_pnl={total_pnl:.4f} USDT, 倉位數={len(positions_list)}, "
+                f"config存在={config is not None}, enabled={config.enabled if config else False}, "
+                f"target_pnl={config.target_pnl if config else None} USDT"
+            )
+            
             # 如果配置不存在或未啟用，跳過
             if not config or not config.enabled:
+                logger.debug(f"[Portfolio Trailing {side_name}] ⏭️ 跳過（配置不存在或未啟用）")
                 continue
             
             target_pnl = config.target_pnl
             if target_pnl is None:
+                logger.debug(f"[Portfolio Trailing {side_name}] ⏭️ 跳過（target_pnl 未設定）")
                 continue
             
             # 確保該類別的運行時狀態存在
@@ -569,20 +588,30 @@ async def check_portfolio_trailing_stop(db: Session):
             
             # 如果達到目標，記錄或更新 max_pnl_reached
             # 規則：一旦設定，只增不減，即使 PnL 再次達到目標（但低於 max）也不會重置
+            old_max_pnl_reached = max_pnl_reached  # 保存舊值用於日誌
             if total_pnl >= target_pnl:
                 if max_pnl_reached is None:
                     # 首次達到目標，記錄 max_pnl_reached
                     _portfolio_trailing_runtime_state[side_name.lower()]["max_pnl_reached"] = total_pnl
                     max_pnl_reached = total_pnl
                     logger.info(
-                        f"[Portfolio Trailing {side_name}] 總 PnL 首次達到目標 {target_pnl}，記錄最大 PnL: {max_pnl_reached}"
+                        f"[Portfolio Trailing {side_name}] ✅ 總 PnL ({total_pnl:.4f}) 首次達到目標 {target_pnl:.4f}，"
+                        f"記錄最大 PnL: {max_pnl_reached:.4f}"
                     )
                 elif total_pnl > max_pnl_reached:
                     # 如果當前 PnL 高於已記錄的最大值，更新最大值（只增不減）
+                    old_max_pnl_reached = max_pnl_reached  # 保存更新前的值
                     _portfolio_trailing_runtime_state[side_name.lower()]["max_pnl_reached"] = total_pnl
                     max_pnl_reached = total_pnl
                     logger.info(
-                        f"[Portfolio Trailing {side_name}] 總 PnL 超越之前記錄，更新最大 PnL: {max_pnl_reached}"
+                        f"[Portfolio Trailing {side_name}] ✅ 總 PnL ({total_pnl:.4f}) 超越之前記錄 ({old_max_pnl_reached:.4f})，"
+                        f"更新最大 PnL: {max_pnl_reached:.4f}"
+                    )
+                else:
+                    # 當前 PnL 在目標以上但低於已記錄的最大值（不更新，保持最大記錄）
+                    logger.debug(
+                        f"[Portfolio Trailing {side_name}] 總 PnL ({total_pnl:.4f}) >= 目標 ({target_pnl:.4f}) "
+                        f"但低於已記錄最大值 ({max_pnl_reached:.4f})，不更新"
                     )
             
             # 如果已記錄 max_pnl_reached，檢查是否需要賣出
@@ -597,12 +626,39 @@ async def check_portfolio_trailing_stop(db: Session):
                 # 計算賣出門檻
                 sell_threshold = max_pnl_reached * lock_ratio
                 
+                # 記錄檢查狀態（用於調試） - 使用 INFO 級別以便在生產環境中也能看到
+                should_trigger_sell = total_pnl <= sell_threshold
+                
+                # 為 SHORT 添加特殊說明（因為 SHORT 的 PnL 行為與 LONG 相反）
+                side_note = ""
+                if side_name == "SHORT":
+                    side_note = " (SHORT: 價格下跌時 PnL 增加，價格上漲時 PnL 減少)"
+                
+                logger.info(
+                    f"[Portfolio Trailing {side_name}] 📊 賣出條件檢查{side_note}: "
+                    f"total_pnl={total_pnl:.4f} USDT, "
+                    f"max_pnl_reached={max_pnl_reached:.4f} USDT, "
+                    f"lock_ratio={lock_ratio:.4f}, "
+                    f"sell_threshold={sell_threshold:.4f} USDT (= {max_pnl_reached:.4f} × {lock_ratio:.4f}), "
+                    f"條件檢查: {total_pnl:.4f} <= {sell_threshold:.4f} = {should_trigger_sell}, "
+                    f"倉位數量={len(positions_list)}"
+                )
+                
                 # 檢查是否應該觸發自動賣出
-                if total_pnl <= sell_threshold:
+                if should_trigger_sell:
                     logger.warning(
-                        f"[Portfolio Trailing {side_name}] 總 PnL ({total_pnl:.2f}) 已降至賣出門檻 ({sell_threshold:.2f} = "
-                        f"{max_pnl_reached:.2f} × {lock_ratio})，開始關閉所有 {side_name} 倉位"
+                        f"[Portfolio Trailing {side_name}] ⚠️ 總 PnL ({total_pnl:.4f}) 已降至賣出門檻 ({sell_threshold:.4f} = "
+                        f"{max_pnl_reached:.4f} × {lock_ratio:.4f})，開始關閉所有 {side_name} 倉位（共 {len(positions_list)} 個）"
                     )
+                    
+                    # 驗證倉位列表不為空
+                    if not positions_list:
+                        logger.warning(
+                            f"[Portfolio Trailing {side_name}] 警告：觸發自動賣出但倉位列表為空，跳過關倉操作"
+                        )
+                        # 仍然重置 max_pnl_reached（避免重複觸發）
+                        _portfolio_trailing_runtime_state[side_name.lower()]["max_pnl_reached"] = None
+                        continue
                     
                     # 關閉該類別的所有倉位
                     closed_count = 0
@@ -622,8 +678,11 @@ async def check_portfolio_trailing_stop(db: Session):
                             continue
                         
                         try:
+                            # 關閉倉位的訂單方向：
+                            # - LONG 倉位：使用 SELL 訂單（賣出平多）
+                            # - SHORT 倉位：使用 BUY 訂單（買入平空）
                             side = "SELL" if side_name == "LONG" else "BUY"
-                            qty = abs(position_amt)
+                            qty = abs(position_amt)  # SHORT 的 position_amt 為負數，使用 abs 取得正數量
                             
                             timestamp = int(time.time() * 1000)
                             client_order_id = f"TVBOT_PORTFOLIO_TRAILING_{side_name}_{timestamp}_{closed_count}"
@@ -679,14 +738,12 @@ async def check_portfolio_trailing_stop(db: Session):
                     
                     # 重置該類別的 max_pnl_reached（所有倉位已關閉或自動賣出已觸發）
                     _portfolio_trailing_runtime_state[side_name.lower()]["max_pnl_reached"] = None
-                    logger.info(f"[Portfolio Trailing {side_name}] 自動賣出觸發，已重置 Max PnL Reached")
-                    
                     logger.info(
-                        f"[Portfolio Trailing {side_name}] 自動賣出完成：關閉 {closed_count} 個倉位，"
-                        f"錯誤: {len(errors)}"
+                        f"[Portfolio Trailing {side_name}] ✅ 自動賣出觸發，已重置 Max PnL Reached。"
+                        f"關閉 {closed_count} 個倉位，錯誤數: {len(errors)}"
                     )
                     if errors:
-                        logger.error(f"[Portfolio Trailing {side_name}] 關閉倉位時的錯誤: {errors}")
+                        logger.error(f"[Portfolio Trailing {side_name}] ❌ 關閉倉位時的錯誤詳情: {errors}")
             
             # 更新最後檢查時間
             _portfolio_trailing_runtime_state[side_name.lower()]["last_check_time"] = time.time()
