@@ -1752,6 +1752,15 @@ async function closeAllBinancePositions(side) {
   }
 }
 
+// Wrapper functions for closing LONG/SHORT positions (for event listeners)
+function closeAllLongPositions() {
+  closeAllBinancePositions("long");
+}
+
+function closeAllShortPositions() {
+  closeAllBinancePositions("short");
+}
+
 // 重置 Max PnL Reached (LONG or SHORT)
 async function resetMaxPnlReached(side) {
   const sideName = side === "long" ? "LONG" : "SHORT";
@@ -1814,12 +1823,20 @@ async function resetMaxPnlReached(side) {
 
 // 儲存 Portfolio Trailing 設定 (LONG or SHORT)
 async function savePortfolioTrailingConfig(side) {
+  console.log(`[savePortfolioTrailingConfig] Called for side: ${side}`);
   const sideName = side === "long" ? "LONG" : "SHORT";
   const enabledCheckbox = document.getElementById(`portfolio-trailing-enabled-${side}`);
   const targetPnlInput = document.getElementById(`portfolio-target-pnl-${side}`);
   const lockRatioInput = document.getElementById(`portfolio-lock-ratio-${side}`);
   
+  console.log(`[savePortfolioTrailingConfig ${sideName}] Found elements:`, {
+    enabledCheckbox: !!enabledCheckbox,
+    targetPnlInput: !!targetPnlInput,
+    lockRatioInput: !!lockRatioInput
+  });
+  
   if (!enabledCheckbox || !targetPnlInput || !lockRatioInput) {
+    console.error(`[savePortfolioTrailingConfig ${sideName}] Missing elements!`);
     alert(`找不到 ${sideName} 設定欄位`);
     return;
   }
@@ -4533,18 +4550,36 @@ document.addEventListener("DOMContentLoaded", function() {
 
   const closeAllLongBtn = document.getElementById("close-all-long-positions-btn");
   if (closeAllLongBtn) {
-    closeAllLongBtn.addEventListener("click", closeAllLongPositions);
+    console.log("[Event Listener] Attaching closeAllLongPositions button");
+    closeAllLongBtn.addEventListener("click", () => {
+      console.log("[Event Listener] Close All LONG button clicked");
+      closeAllLongPositions();
+    });
+  } else {
+    console.warn("[Event Listener] close-all-long-positions-btn not found!");
   }
 
   const closeAllShortBtn = document.getElementById("close-all-short-positions-btn");
   if (closeAllShortBtn) {
-    closeAllShortBtn.addEventListener("click", closeAllShortPositions);
+    console.log("[Event Listener] Attaching closeAllShortPositions button");
+    closeAllShortBtn.addEventListener("click", () => {
+      console.log("[Event Listener] Close All SHORT button clicked");
+      closeAllShortPositions();
+    });
+  } else {
+    console.warn("[Event Listener] close-all-short-positions-btn not found!");
   }
   
   // LONG Portfolio Trailing Config buttons
   const savePortfolioTrailingBtnLong = document.getElementById("save-portfolio-trailing-btn-long");
   if (savePortfolioTrailingBtnLong) {
-    savePortfolioTrailingBtnLong.addEventListener("click", () => savePortfolioTrailingConfig("long"));
+    console.log("[Event Listener] Attaching save button for LONG");
+    savePortfolioTrailingBtnLong.addEventListener("click", () => {
+      console.log("[Event Listener] LONG save button clicked");
+      savePortfolioTrailingConfig("long");
+    });
+  } else {
+    console.warn("[Event Listener] save-portfolio-trailing-btn-long not found!");
   }
 
   const resetMaxPnlBtnLong = document.getElementById("reset-max-pnl-btn-long");
@@ -4555,7 +4590,13 @@ document.addEventListener("DOMContentLoaded", function() {
   // SHORT Portfolio Trailing Config buttons
   const savePortfolioTrailingBtnShort = document.getElementById("save-portfolio-trailing-btn-short");
   if (savePortfolioTrailingBtnShort) {
-    savePortfolioTrailingBtnShort.addEventListener("click", () => savePortfolioTrailingConfig("short"));
+    console.log("[Event Listener] Attaching save button for SHORT");
+    savePortfolioTrailingBtnShort.addEventListener("click", () => {
+      console.log("[Event Listener] SHORT save button clicked");
+      savePortfolioTrailingConfig("short");
+    });
+  } else {
+    console.warn("[Event Listener] save-portfolio-trailing-btn-short not found!");
   }
 
   const resetMaxPnlBtnShort = document.getElementById("reset-max-pnl-btn-short");
