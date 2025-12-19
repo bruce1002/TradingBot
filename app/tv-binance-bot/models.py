@@ -317,39 +317,3 @@ class PortfolioTrailingConfig(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
-
-class SymbolLock(Base):
-    """
-    Symbol Lock 模型
-    
-    用於實現 One-way mode 下的單一 bot 每 symbol 安全機制。
-    確保在任何給定的 symbol 上，最多只有一個 bot 可以持有開倉位置。
-    """
-    
-    __tablename__ = "symbol_locks"
-    
-    # 主鍵：交易對
-    symbol = Column(String(20), primary_key=True, index=True, comment="交易對，例如：BTCUSDT")
-    
-    # 鎖定資訊
-    owner_bot_id = Column(Integer, nullable=False, comment="擁有該 symbol 的 Bot ID，0 表示系統擁有的鎖（需要手動清除）")
-    reason = Column(String(200), nullable=True, comment="鎖定原因說明")
-    
-    # 時間戳記
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="建立時間")
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新時間")
-    
-    def __repr__(self):
-        """字串表示，方便除錯"""
-        return f"<SymbolLock(symbol={self.symbol}, owner_bot_id={self.owner_bot_id}, reason={self.reason})>"
-    
-    def to_dict(self):
-        """將模型轉換為字典"""
-        return {
-            "symbol": self.symbol,
-            "owner_bot_id": self.owner_bot_id,
-            "reason": self.reason,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-

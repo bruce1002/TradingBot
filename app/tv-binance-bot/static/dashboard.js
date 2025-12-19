@@ -1655,6 +1655,65 @@ async function closeAllBinancePositions() {
   }
 }
 
+// 重置 Max PnL Reached
+async function resetMaxPnlReached() {
+  if (!confirm("確定要重置 Max PnL Reached 嗎？此操作會清除已記錄的最大 PnL 值。")) {
+    return;
+  }
+
+  const btn = document.getElementById("reset-max-pnl-btn");
+  const originalText = btn ? btn.textContent : "Reset";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "重置中...";
+  }
+
+  try {
+    const resp = await fetch("/binance/portfolio/trailing/reset-max-pnl", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (await handleFetchError(resp)) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+      return;
+    }
+
+    if (!resp.ok) {
+      let errorMessage = `HTTP ${resp.status}`;
+      try {
+        const errorData = await resp.json();
+        errorMessage = errorData.detail || errorData.message || errorMessage;
+      } catch (e) {
+        const text = await resp.text().catch(() => "");
+        if (text) {
+          errorMessage = text;
+        }
+      }
+      throw new Error(errorMessage);
+    }
+
+    const result = await resp.json();
+    alert(result.message || "Max PnL Reached 已重置");
+
+    // 重新載入 Portfolio Summary 以更新顯示
+    await loadPortfolioSummaryOnly();
+  } catch (error) {
+    console.error("重置 Max PnL Reached 失敗:", error);
+    alert(`重置失敗：${error.message || String(error)}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+}
+
 // 儲存 Portfolio Trailing 設定
 async function savePortfolioTrailingConfig() {
   const enabledCheckbox = document.getElementById("portfolio-trailing-enabled");
@@ -4344,6 +4403,11 @@ document.addEventListener("DOMContentLoaded", function() {
   const savePortfolioTrailingBtn = document.getElementById("save-portfolio-trailing-btn");
   if (savePortfolioTrailingBtn) {
     savePortfolioTrailingBtn.addEventListener("click", savePortfolioTrailingConfig);
+  }
+
+  const resetMaxPnlBtn = document.getElementById("reset-max-pnl-btn");
+  if (resetMaxPnlBtn) {
+    resetMaxPnlBtn.addEventListener("click", resetMaxPnlReached);
   }
   
   // 設定 Symbol 連結點擊事件（使用事件委派，因為表格會動態更新）
