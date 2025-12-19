@@ -6428,13 +6428,19 @@ async def update_portfolio_trailing_config(
     
     if "target_pnl" in data:
         old_target_pnl = config.target_pnl
-        config.target_pnl = data["target_pnl"]
+        new_target_pnl = data["target_pnl"]
+        config.target_pnl = new_target_pnl  # Can be None to clear the value
         # 如果更新 target_pnl，重置 max_pnl_reached（需要重新達到目標）
-        if data["target_pnl"] is not None and data["target_pnl"] != old_target_pnl:
+        # Compare with explicit None check for proper null handling
+        if (old_target_pnl is None) != (new_target_pnl is None) or (old_target_pnl is not None and new_target_pnl is not None and abs(old_target_pnl - new_target_pnl) > 0.0001):
             _portfolio_trailing_runtime_state[side_lower]["max_pnl_reached"] = None
+            logger.info(f"Portfolio Trailing ({side_lower.upper()}) target_pnl 已更新: {old_target_pnl} -> {new_target_pnl}，已重置 max_pnl_reached")
     
     if "lock_ratio" in data:
-        config.lock_ratio = data["lock_ratio"]
+        old_lock_ratio = config.lock_ratio
+        new_lock_ratio = data["lock_ratio"]
+        config.lock_ratio = new_lock_ratio  # Can be None to clear the value
+        logger.debug(f"Portfolio Trailing ({side_lower.upper()}) lock_ratio 已更新: {old_lock_ratio} -> {new_lock_ratio}")
     
     try:
         db.commit()

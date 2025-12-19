@@ -1147,11 +1147,15 @@ async function loadPortfolioSummary() {
       }
       
       if (longTargetPnlInput) {
-        longTargetPnlInput.value = longData.portfolio_trailing.target_pnl ? String(longData.portfolio_trailing.target_pnl) : "";
+        // Handle null/undefined values: show empty string (which displays placeholder)
+        const targetPnl = longData.portfolio_trailing.target_pnl;
+        longTargetPnlInput.value = (targetPnl !== null && targetPnl !== undefined) ? String(targetPnl) : "";
       }
       
       if (longLockRatioInput) {
-        longLockRatioInput.value = longData.portfolio_trailing.lock_ratio ? String(longData.portfolio_trailing.lock_ratio) : "";
+        // Handle null/undefined values: show empty string (which displays placeholder)
+        const lockRatio = longData.portfolio_trailing.lock_ratio;
+        longLockRatioInput.value = (lockRatio !== null && lockRatio !== undefined) ? String(lockRatio) : "";
       }
     }
     
@@ -1183,21 +1187,33 @@ async function loadPortfolioSummary() {
     
     // 更新 SHORT Portfolio Trailing 設定
     if (shortData.portfolio_trailing) {
+      console.log("[loadPortfolioSummary] Loading SHORT config:", shortData.portfolio_trailing);
       const shortEnabledCheckbox = document.getElementById("portfolio-trailing-enabled-short");
       const shortTargetPnlInput = document.getElementById("portfolio-target-pnl-short");
       const shortLockRatioInput = document.getElementById("portfolio-lock-ratio-short");
       
       if (shortEnabledCheckbox) {
         shortEnabledCheckbox.checked = shortData.portfolio_trailing.enabled || false;
+        console.log(`[loadPortfolioSummary] SHORT enabled set to: ${shortEnabledCheckbox.checked}`);
       }
       
       if (shortTargetPnlInput) {
-        shortTargetPnlInput.value = shortData.portfolio_trailing.target_pnl ? String(shortData.portfolio_trailing.target_pnl) : "";
+        // Handle null/undefined values: show empty string (which displays placeholder)
+        const targetPnl = shortData.portfolio_trailing.target_pnl;
+        const targetPnlValue = (targetPnl !== null && targetPnl !== undefined) ? String(targetPnl) : "";
+        shortTargetPnlInput.value = targetPnlValue;
+        console.log(`[loadPortfolioSummary] SHORT target_pnl set to: "${targetPnlValue}" (raw: ${targetPnl})`);
       }
       
       if (shortLockRatioInput) {
-        shortLockRatioInput.value = shortData.portfolio_trailing.lock_ratio ? String(shortData.portfolio_trailing.lock_ratio) : "";
+        // Handle null/undefined values: show empty string (which displays placeholder)
+        const lockRatio = shortData.portfolio_trailing.lock_ratio;
+        const lockRatioValue = (lockRatio !== null && lockRatio !== undefined) ? String(lockRatio) : "";
+        shortLockRatioInput.value = lockRatioValue;
+        console.log(`[loadPortfolioSummary] SHORT lock_ratio set to: "${lockRatioValue}" (raw: ${lockRatio})`);
       }
+    } else {
+      console.warn("[loadPortfolioSummary] shortData.portfolio_trailing is missing!");
     }
   } catch (err) {
     console.error("loadPortfolioSummary error:", err);
@@ -1812,14 +1828,26 @@ async function savePortfolioTrailingConfig(side) {
     enabled: enabledCheckbox.checked,
   };
   
+  // Handle target_pnl: if empty string, send null to clear it; otherwise parse and include
   const targetPnlVal = targetPnlInput.value.trim();
-  if (targetPnlVal) {
-    payload.target_pnl = parseFloat(targetPnlVal);
+  if (targetPnlVal === "") {
+    payload.target_pnl = null;  // Explicitly clear the value
+  } else if (targetPnlVal) {
+    const parsed = parseFloat(targetPnlVal);
+    if (!isNaN(parsed)) {
+      payload.target_pnl = parsed;
+    }
   }
   
+  // Handle lock_ratio: if empty string, send null to clear it; otherwise parse and include
   const lockRatioVal = lockRatioInput.value.trim();
-  if (lockRatioVal) {
-    payload.lock_ratio = parseFloat(lockRatioVal);
+  if (lockRatioVal === "") {
+    payload.lock_ratio = null;  // Explicitly clear the value
+  } else if (lockRatioVal) {
+    const parsed = parseFloat(lockRatioVal);
+    if (!isNaN(parsed)) {
+      payload.lock_ratio = parsed;
+    }
   }
 
   const btn = document.getElementById(`save-portfolio-trailing-btn-${side}`);
@@ -1828,6 +1856,8 @@ async function savePortfolioTrailingConfig(side) {
     btn.disabled = true;
     btn.textContent = "儲存中...";
   }
+  
+  console.log(`[savePortfolioTrailingConfig ${sideName}] Sending payload:`, payload);
   
   try {
     const resp = await fetch(`/binance/portfolio/trailing?side=${side}`, {
