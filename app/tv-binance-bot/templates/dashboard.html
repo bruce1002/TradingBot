@@ -155,47 +155,101 @@
                 <!-- Portfolio Summary and Controls -->
                 <div class="portfolio-controls" style="margin-bottom: 20px; padding: 20px; background: var(--card-bg, #1e1e1e); border-radius: 8px; border: 1px solid var(--border-color, #333);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h3 style="margin: 0; color: var(--text-primary, #fff);">Portfolio Summary</h3>
+                        <h3 style="margin: 0; color: var(--text-primary, #fff);">Portfolio Summary & Trailing Stop</h3>
                         <button id="close-all-positions-btn" class="btn-danger" style="padding: 8px 16px;">Close All Positions</button>
                     </div>
-                    <div id="portfolio-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                        <div>
-                            <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Total Unrealized PnL</div>
-                            <div id="total-pnl" style="font-size: 24px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
-                        </div>
-                        <div>
-                            <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Position Count</div>
-                            <div id="position-count" style="font-size: 24px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
-                        </div>
-                        <div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                                <div style="color: var(--text-muted, #888); font-size: 12px;">Max PnL Reached</div>
-                                <button id="reset-max-pnl-btn" class="action-btn" style="padding: 4px 8px; font-size: 11px; line-height: 1;" title="重置 Max PnL Reached">Reset</button>
+                    
+                    <!-- LONG Category -->
+                    <div style="margin-bottom: 30px; padding: 15px; background: var(--card-bg, #252525); border-radius: 6px; border: 1px solid var(--border-color, #444);">
+                        <h4 style="margin: 0 0 15px 0; color: var(--pnl-positive, #00ff88);">LONG Positions</h4>
+                        
+                        <!-- LONG Portfolio Summary -->
+                        <div id="portfolio-summary-long" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                            <div>
+                                <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Total Unrealized PnL</div>
+                                <div id="total-pnl-long" style="font-size: 20px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
                             </div>
-                            <div id="max-pnl-reached" style="font-size: 24px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                            <div>
+                                <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Position Count</div>
+                                <div id="position-count-long" style="font-size: 20px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                    <div style="color: var(--text-muted, #888); font-size: 12px;">Max PnL Reached</div>
+                                    <button id="reset-max-pnl-btn-long" class="action-btn" style="padding: 3px 6px; font-size: 10px; line-height: 1;" title="重置 Max PnL Reached (LONG)">Reset</button>
+                                </div>
+                                <div id="max-pnl-reached-long" style="font-size: 20px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                            </div>
+                        </div>
+                        
+                        <!-- LONG Portfolio Trailing Stop Controls -->
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color, #444);">
+                            <h5 style="margin: 0 0 10px 0; color: var(--text-primary, #fff); font-size: 14px;">Portfolio Trailing Stop (LONG)</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end;">
+                                <label class="setting-item" style="display: flex; flex-direction: column;">
+                                    <span>Enable Auto Sell:</span>
+                                    <input type="checkbox" id="portfolio-trailing-enabled-long" style="width: auto; margin-top: 5px;">
+                                </label>
+                                <label class="setting-item" style="display: flex; flex-direction: column;">
+                                    <span>Target PnL (USDT):</span>
+                                    <input type="number" id="portfolio-target-pnl-long" step="0.01" min="0" class="setting-input" placeholder="e.g., 100">
+                                </label>
+                                <label class="setting-item" style="display: flex; flex-direction: column;">
+                                    <span>Lock Ratio:</span>
+                                    <input type="number" id="portfolio-lock-ratio-long" step="0.05" min="0" max="1" class="setting-input" placeholder="e.g., 0.65">
+                                </label>
+                                <button id="save-portfolio-trailing-btn-long" class="action-btn" style="padding: 8px 16px; font-size: 12px;">Save Config (LONG)</button>
+                            </div>
+                            <div style="margin-top: 8px; color: var(--text-muted, #888); font-size: 11px;">
+                                <small>When total LONG PnL reaches Target, max PnL is recorded. If PnL falls to (Max PnL × Lock Ratio), all LONG positions will be closed automatically.</small>
+                            </div>
                         </div>
                     </div>
                     
-                    <!-- Portfolio Trailing Stop Controls -->
-                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color, #333);">
-                        <h4 style="margin: 0 0 15px 0; color: var(--text-primary, #fff);">Portfolio Trailing Stop</h4>
-                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; align-items: end;">
-                            <label class="setting-item" style="display: flex; flex-direction: column;">
-                                <span>Enable Auto Sell:</span>
-                                <input type="checkbox" id="portfolio-trailing-enabled" style="width: auto; margin-top: 5px;">
-                            </label>
-                            <label class="setting-item" style="display: flex; flex-direction: column;">
-                                <span>Target PnL (USDT):</span>
-                                <input type="number" id="portfolio-target-pnl" step="0.01" min="0" class="setting-input" placeholder="e.g., 100">
-                            </label>
-                            <label class="setting-item" style="display: flex; flex-direction: column;">
-                                <span>Lock Ratio:</span>
-                                <input type="number" id="portfolio-lock-ratio" step="0.05" min="0" max="1" class="setting-input" placeholder="e.g., 0.65">
-                            </label>
-                            <button id="save-portfolio-trailing-btn" class="action-btn" style="padding: 10px 20px;">Save Config</button>
+                    <!-- SHORT Category -->
+                    <div style="padding: 15px; background: var(--card-bg, #252525); border-radius: 6px; border: 1px solid var(--border-color, #444);">
+                        <h4 style="margin: 0 0 15px 0; color: var(--pnl-negative, #ff4444);">SHORT Positions</h4>
+                        
+                        <!-- SHORT Portfolio Summary -->
+                        <div id="portfolio-summary-short" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                            <div>
+                                <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Total Unrealized PnL</div>
+                                <div id="total-pnl-short" style="font-size: 20px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                            </div>
+                            <div>
+                                <div style="color: var(--text-muted, #888); font-size: 12px; margin-bottom: 5px;">Position Count</div>
+                                <div id="position-count-short" style="font-size: 20px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                    <div style="color: var(--text-muted, #888); font-size: 12px;">Max PnL Reached</div>
+                                    <button id="reset-max-pnl-btn-short" class="action-btn" style="padding: 3px 6px; font-size: 10px; line-height: 1;" title="重置 Max PnL Reached (SHORT)">Reset</button>
+                                </div>
+                                <div id="max-pnl-reached-short" style="font-size: 20px; font-weight: bold; color: var(--text-primary, #fff);">-</div>
+                            </div>
                         </div>
-                        <div style="margin-top: 10px; color: var(--text-muted, #888); font-size: 12px;">
-                            <small>When total PnL reaches Target, max PnL is recorded. If PnL falls to (Max PnL × Lock Ratio), all positions will be closed automatically.</small>
+                        
+                        <!-- SHORT Portfolio Trailing Stop Controls -->
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color, #444);">
+                            <h5 style="margin: 0 0 10px 0; color: var(--text-primary, #fff); font-size: 14px;">Portfolio Trailing Stop (SHORT)</h5>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; align-items: end;">
+                                <label class="setting-item" style="display: flex; flex-direction: column;">
+                                    <span>Enable Auto Sell:</span>
+                                    <input type="checkbox" id="portfolio-trailing-enabled-short" style="width: auto; margin-top: 5px;">
+                                </label>
+                                <label class="setting-item" style="display: flex; flex-direction: column;">
+                                    <span>Target PnL (USDT):</span>
+                                    <input type="number" id="portfolio-target-pnl-short" step="0.01" min="0" class="setting-input" placeholder="e.g., 100">
+                                </label>
+                                <label class="setting-item" style="display: flex; flex-direction: column;">
+                                    <span>Lock Ratio:</span>
+                                    <input type="number" id="portfolio-lock-ratio-short" step="0.05" min="0" max="1" class="setting-input" placeholder="e.g., 0.65">
+                                </label>
+                                <button id="save-portfolio-trailing-btn-short" class="action-btn" style="padding: 8px 16px; font-size: 12px;">Save Config (SHORT)</button>
+                            </div>
+                            <div style="margin-top: 8px; color: var(--text-muted, #888); font-size: 11px;">
+                                <small>When total SHORT PnL reaches Target, max PnL is recorded. If PnL falls to (Max PnL × Lock Ratio), all SHORT positions will be closed automatically.</small>
+                            </div>
                         </div>
                     </div>
                 </div>

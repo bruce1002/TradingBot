@@ -1022,36 +1022,61 @@ async function loadPortfolioSummaryOnly() {
     
     const data = await response.json();
     
-    // 確保 data 和 data.portfolio_trailing 存在
-    if (!data || !data.portfolio_trailing) {
+    // 新的 API 結構：{long: {...}, short: {...}}
+    if (!data || !data.long || !data.short) {
       console.error("Portfolio Summary 資料格式錯誤:", data);
       return;
     }
     
-    // 更新總 PnL
-    const totalPnlEl = document.getElementById("total-pnl");
-    if (totalPnlEl) {
-      const pnl = data.total_unrealized_pnl || 0;
-      totalPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
-      totalPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
+    // 更新 LONG Portfolio Summary
+    const longData = data.long;
+    const longPnlEl = document.getElementById("total-pnl-long");
+    if (longPnlEl) {
+      const pnl = longData.total_unrealized_pnl || 0;
+      longPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
+      longPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
     }
     
-    // 更新倉位數量
-    const positionCountEl = document.getElementById("position-count");
-    if (positionCountEl) {
-      positionCountEl.textContent = data.position_count || 0;
+    const longCountEl = document.getElementById("position-count-long");
+    if (longCountEl) {
+      longCountEl.textContent = longData.position_count || 0;
     }
     
-    // 更新 Max PnL Reached
-    const maxPnlEl = document.getElementById("max-pnl-reached");
-    if (maxPnlEl) {
-      const maxPnl = data.portfolio_trailing.max_pnl_reached;
+    const longMaxPnlEl = document.getElementById("max-pnl-reached-long");
+    if (longMaxPnlEl && longData.portfolio_trailing) {
+      const maxPnl = longData.portfolio_trailing.max_pnl_reached;
       if (maxPnl !== null && maxPnl !== undefined) {
-        maxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
-        maxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
+        longMaxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
+        longMaxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
       } else {
-        maxPnlEl.textContent = "-";
-        maxPnlEl.style.color = "var(--text-primary, #fff)";
+        longMaxPnlEl.textContent = "-";
+        longMaxPnlEl.style.color = "var(--text-primary, #fff)";
+      }
+    }
+    
+    // 更新 SHORT Portfolio Summary
+    const shortData = data.short;
+    const shortPnlEl = document.getElementById("total-pnl-short");
+    if (shortPnlEl) {
+      const pnl = shortData.total_unrealized_pnl || 0;
+      shortPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
+      shortPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
+    }
+    
+    const shortCountEl = document.getElementById("position-count-short");
+    if (shortCountEl) {
+      shortCountEl.textContent = shortData.position_count || 0;
+    }
+    
+    const shortMaxPnlEl = document.getElementById("max-pnl-reached-short");
+    if (shortMaxPnlEl && shortData.portfolio_trailing) {
+      const maxPnl = shortData.portfolio_trailing.max_pnl_reached;
+      if (maxPnl !== null && maxPnl !== undefined) {
+        shortMaxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
+        shortMaxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
+      } else {
+        shortMaxPnlEl.textContent = "-";
+        shortMaxPnlEl.style.color = "var(--text-primary, #fff)";
       }
     }
     
@@ -1079,55 +1104,100 @@ async function loadPortfolioSummary() {
     
     const data = await response.json();
     
-    // 確保 data 和 data.portfolio_trailing 存在
-    if (!data || !data.portfolio_trailing) {
+    // 新的 API 結構：{long: {...}, short: {...}}
+    if (!data || !data.long || !data.short) {
       console.error("Portfolio Summary 資料格式錯誤:", data);
       return;
     }
     
-    // 更新總 PnL
-    const totalPnlEl = document.getElementById("total-pnl");
-    if (totalPnlEl) {
-      const pnl = data.total_unrealized_pnl || 0;
-      totalPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
-      totalPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
+    // 更新 LONG Portfolio Summary
+    const longData = data.long;
+    const longPnlEl = document.getElementById("total-pnl-long");
+    if (longPnlEl) {
+      const pnl = longData.total_unrealized_pnl || 0;
+      longPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
+      longPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
     }
     
-    // 更新倉位數量
-    const positionCountEl = document.getElementById("position-count");
-    if (positionCountEl) {
-      positionCountEl.textContent = data.position_count || 0;
+    const longCountEl = document.getElementById("position-count-long");
+    if (longCountEl) {
+      longCountEl.textContent = longData.position_count || 0;
     }
     
-    // 更新 Max PnL Reached
-    const maxPnlEl = document.getElementById("max-pnl-reached");
-    if (maxPnlEl) {
-      const maxPnl = data.portfolio_trailing.max_pnl_reached;
+    const longMaxPnlEl = document.getElementById("max-pnl-reached-long");
+    if (longMaxPnlEl && longData.portfolio_trailing) {
+      const maxPnl = longData.portfolio_trailing.max_pnl_reached;
       if (maxPnl !== null && maxPnl !== undefined) {
-        maxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
-        maxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
+        longMaxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
+        longMaxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
       } else {
-        maxPnlEl.textContent = "-";
-        maxPnlEl.style.color = "var(--text-primary, #fff)";
+        longMaxPnlEl.textContent = "-";
+        longMaxPnlEl.style.color = "var(--text-primary, #fff)";
       }
     }
     
-    // 更新 Portfolio Trailing 設定
-    // 只在完整載入時更新（例如：保存後或初始載入）
-    const enabledCheckbox = document.getElementById("portfolio-trailing-enabled");
-    const targetPnlInput = document.getElementById("portfolio-target-pnl");
-    const lockRatioInput = document.getElementById("portfolio-lock-ratio");
-    
-    if (enabledCheckbox) {
-      enabledCheckbox.checked = data.portfolio_trailing.enabled || false;
+    // 更新 LONG Portfolio Trailing 設定
+    if (longData.portfolio_trailing) {
+      const longEnabledCheckbox = document.getElementById("portfolio-trailing-enabled-long");
+      const longTargetPnlInput = document.getElementById("portfolio-target-pnl-long");
+      const longLockRatioInput = document.getElementById("portfolio-lock-ratio-long");
+      
+      if (longEnabledCheckbox) {
+        longEnabledCheckbox.checked = longData.portfolio_trailing.enabled || false;
+      }
+      
+      if (longTargetPnlInput) {
+        longTargetPnlInput.value = longData.portfolio_trailing.target_pnl ? String(longData.portfolio_trailing.target_pnl) : "";
+      }
+      
+      if (longLockRatioInput) {
+        longLockRatioInput.value = longData.portfolio_trailing.lock_ratio ? String(longData.portfolio_trailing.lock_ratio) : "";
+      }
     }
     
-    if (targetPnlInput) {
-      targetPnlInput.value = data.portfolio_trailing.target_pnl ? String(data.portfolio_trailing.target_pnl) : "";
+    // 更新 SHORT Portfolio Summary
+    const shortData = data.short;
+    const shortPnlEl = document.getElementById("total-pnl-short");
+    if (shortPnlEl) {
+      const pnl = shortData.total_unrealized_pnl || 0;
+      shortPnlEl.textContent = fmtNumber(pnl, 2) + " USDT";
+      shortPnlEl.style.color = pnl > 0 ? "var(--pnl-positive, #00ff88)" : pnl < 0 ? "var(--pnl-negative, #ff4444)" : "var(--text-primary, #fff)";
     }
     
-    if (lockRatioInput) {
-      lockRatioInput.value = data.portfolio_trailing.lock_ratio ? String(data.portfolio_trailing.lock_ratio) : "";
+    const shortCountEl = document.getElementById("position-count-short");
+    if (shortCountEl) {
+      shortCountEl.textContent = shortData.position_count || 0;
+    }
+    
+    const shortMaxPnlEl = document.getElementById("max-pnl-reached-short");
+    if (shortMaxPnlEl && shortData.portfolio_trailing) {
+      const maxPnl = shortData.portfolio_trailing.max_pnl_reached;
+      if (maxPnl !== null && maxPnl !== undefined) {
+        shortMaxPnlEl.textContent = fmtNumber(maxPnl, 2) + " USDT";
+        shortMaxPnlEl.style.color = "var(--pnl-positive, #00ff88)";
+      } else {
+        shortMaxPnlEl.textContent = "-";
+        shortMaxPnlEl.style.color = "var(--text-primary, #fff)";
+      }
+    }
+    
+    // 更新 SHORT Portfolio Trailing 設定
+    if (shortData.portfolio_trailing) {
+      const shortEnabledCheckbox = document.getElementById("portfolio-trailing-enabled-short");
+      const shortTargetPnlInput = document.getElementById("portfolio-target-pnl-short");
+      const shortLockRatioInput = document.getElementById("portfolio-lock-ratio-short");
+      
+      if (shortEnabledCheckbox) {
+        shortEnabledCheckbox.checked = shortData.portfolio_trailing.enabled || false;
+      }
+      
+      if (shortTargetPnlInput) {
+        shortTargetPnlInput.value = shortData.portfolio_trailing.target_pnl ? String(shortData.portfolio_trailing.target_pnl) : "";
+      }
+      
+      if (shortLockRatioInput) {
+        shortLockRatioInput.value = shortData.portfolio_trailing.lock_ratio ? String(shortData.portfolio_trailing.lock_ratio) : "";
+      }
     }
   } catch (err) {
     console.error("loadPortfolioSummary error:", err);
@@ -1655,13 +1725,14 @@ async function closeAllBinancePositions() {
   }
 }
 
-// 重置 Max PnL Reached
-async function resetMaxPnlReached() {
-  if (!confirm("確定要重置 Max PnL Reached 嗎？此操作會清除已記錄的最大 PnL 值。")) {
+// 重置 Max PnL Reached (LONG or SHORT)
+async function resetMaxPnlReached(side) {
+  const sideName = side === "long" ? "LONG" : "SHORT";
+  if (!confirm(`確定要重置 ${sideName} 的 Max PnL Reached 嗎？此操作會清除已記錄的最大 PnL 值。`)) {
     return;
   }
 
-  const btn = document.getElementById("reset-max-pnl-btn");
+  const btn = document.getElementById(`reset-max-pnl-btn-${side}`);
   const originalText = btn ? btn.textContent : "Reset";
   if (btn) {
     btn.disabled = true;
@@ -1669,7 +1740,7 @@ async function resetMaxPnlReached() {
   }
 
   try {
-    const resp = await fetch("/binance/portfolio/trailing/reset-max-pnl", {
+    const resp = await fetch(`/binance/portfolio/trailing/reset-max-pnl?side=${side}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1699,12 +1770,12 @@ async function resetMaxPnlReached() {
     }
 
     const result = await resp.json();
-    alert(result.message || "Max PnL Reached 已重置");
+    alert(result.message || `Max PnL Reached (${sideName}) 已重置`);
 
     // 重新載入 Portfolio Summary 以更新顯示
     await loadPortfolioSummaryOnly();
   } catch (error) {
-    console.error("重置 Max PnL Reached 失敗:", error);
+    console.error(`重置 Max PnL Reached (${sideName}) 失敗:`, error);
     alert(`重置失敗：${error.message || String(error)}`);
   } finally {
     if (btn) {
@@ -1714,14 +1785,15 @@ async function resetMaxPnlReached() {
   }
 }
 
-// 儲存 Portfolio Trailing 設定
-async function savePortfolioTrailingConfig() {
-  const enabledCheckbox = document.getElementById("portfolio-trailing-enabled");
-  const targetPnlInput = document.getElementById("portfolio-target-pnl");
-  const lockRatioInput = document.getElementById("portfolio-lock-ratio");
+// 儲存 Portfolio Trailing 設定 (LONG or SHORT)
+async function savePortfolioTrailingConfig(side) {
+  const sideName = side === "long" ? "LONG" : "SHORT";
+  const enabledCheckbox = document.getElementById(`portfolio-trailing-enabled-${side}`);
+  const targetPnlInput = document.getElementById(`portfolio-target-pnl-${side}`);
+  const lockRatioInput = document.getElementById(`portfolio-lock-ratio-${side}`);
   
   if (!enabledCheckbox || !targetPnlInput || !lockRatioInput) {
-    alert("找不到設定欄位");
+    alert(`找不到 ${sideName} 設定欄位`);
     return;
   }
   
@@ -1738,9 +1810,16 @@ async function savePortfolioTrailingConfig() {
   if (lockRatioVal) {
     payload.lock_ratio = parseFloat(lockRatioVal);
   }
+
+  const btn = document.getElementById(`save-portfolio-trailing-btn-${side}`);
+  const originalText = btn ? btn.textContent : "Save Config";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "儲存中...";
+  }
   
   try {
-    const resp = await fetch("/binance/portfolio/trailing", {
+    const resp = await fetch(`/binance/portfolio/trailing?side=${side}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1748,7 +1827,13 @@ async function savePortfolioTrailingConfig() {
       body: JSON.stringify(payload),
     });
     
-    if (await handleFetchError(resp)) return;
+    if (await handleFetchError(resp)) {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+      return;
+    }
     
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
@@ -1756,14 +1841,19 @@ async function savePortfolioTrailingConfig() {
       throw new Error(errorMsg);
     }
     
-    alert("Portfolio Trailing 設定已更新！");
+    alert(`Portfolio Trailing 設定 (${sideName}) 已更新！`);
     
     // 重新載入 summary
     await loadPortfolioSummary();
   } catch (error) {
-    console.error("儲存 Portfolio Trailing 設定失敗:", error);
+    console.error(`儲存 Portfolio Trailing 設定 (${sideName}) 失敗:`, error);
     const errorMsg = error.message || String(error);
     alert(`儲存失敗: ${errorMsg}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   }
 }
 
@@ -4400,14 +4490,26 @@ document.addEventListener("DOMContentLoaded", function() {
     closeAllBtn.addEventListener("click", closeAllBinancePositions);
   }
   
-  const savePortfolioTrailingBtn = document.getElementById("save-portfolio-trailing-btn");
-  if (savePortfolioTrailingBtn) {
-    savePortfolioTrailingBtn.addEventListener("click", savePortfolioTrailingConfig);
+  // LONG Portfolio Trailing Config buttons
+  const savePortfolioTrailingBtnLong = document.getElementById("save-portfolio-trailing-btn-long");
+  if (savePortfolioTrailingBtnLong) {
+    savePortfolioTrailingBtnLong.addEventListener("click", () => savePortfolioTrailingConfig("long"));
   }
 
-  const resetMaxPnlBtn = document.getElementById("reset-max-pnl-btn");
-  if (resetMaxPnlBtn) {
-    resetMaxPnlBtn.addEventListener("click", resetMaxPnlReached);
+  const resetMaxPnlBtnLong = document.getElementById("reset-max-pnl-btn-long");
+  if (resetMaxPnlBtnLong) {
+    resetMaxPnlBtnLong.addEventListener("click", () => resetMaxPnlReached("long"));
+  }
+
+  // SHORT Portfolio Trailing Config buttons
+  const savePortfolioTrailingBtnShort = document.getElementById("save-portfolio-trailing-btn-short");
+  if (savePortfolioTrailingBtnShort) {
+    savePortfolioTrailingBtnShort.addEventListener("click", () => savePortfolioTrailingConfig("short"));
+  }
+
+  const resetMaxPnlBtnShort = document.getElementById("reset-max-pnl-btn-short");
+  if (resetMaxPnlBtnShort) {
+    resetMaxPnlBtnShort.addEventListener("click", () => resetMaxPnlReached("short"));
   }
   
   // 設定 Symbol 連結點擊事件（使用事件委派，因為表格會動態更新）
