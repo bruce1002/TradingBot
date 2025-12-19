@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import delete, and_, or_
+from sqlalchemy.sql import func
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from dataclasses import dataclass
@@ -3223,19 +3224,25 @@ async def get_positions(
     
     if start_date:
         try:
+            # Parse date string and create datetime at start of day in UTC
             start_datetime = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            # Filter positions where created_at is on or after the start date
+            # Compare datetime directly (SQLAlchemy handles timezone-aware comparisons)
             query = query.filter(Position.created_at >= start_datetime)
-        except ValueError:
-            logger.warning(f"Invalid start_date format: {start_date}")
+            logger.debug(f"Date filter: start_date={start_date}, start_datetime={start_datetime}")
+        except ValueError as e:
+            logger.warning(f"Invalid start_date format: {start_date}, error: {e}")
     
     if end_date:
         try:
-            end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            # 結束日期包含整天，所以加一天並使用 < 而不是 <=
-            end_datetime = end_datetime + timedelta(days=1)
+            # Parse date string - end_date is inclusive, so include the entire day
+            # Add 1 day and use < operator to include the entire end_date
+            end_datetime = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+            # Filter positions where created_at is before the start of the next day
             query = query.filter(Position.created_at < end_datetime)
-        except ValueError:
-            logger.warning(f"Invalid end_date format: {end_date}")
+            logger.debug(f"Date filter: end_date={end_date}, end_datetime={end_datetime}")
+        except ValueError as e:
+            logger.warning(f"Invalid end_date format: {end_date}, error: {e}")
     
     positions = query.order_by(Position.created_at.desc()).all()
     
