@@ -3167,6 +3167,40 @@ async function rejectPendingOrder(orderId) {
   }
 }
 
+// 清除所有 EXECUTED 狀態的 Pending Orders
+async function clearExecutedPendingOrders() {
+  const confirmMsg = `確定要清除所有 EXECUTED 狀態的待批准訂單嗎？\n\n此操作會永久刪除這些記錄，無法復原。\n\n注意：只會刪除 EXECUTED 狀態的訂單，不會影響其他狀態的訂單。`;
+  
+  if (!confirm(confirmMsg)) {
+    return;
+  }
+  
+  try {
+    const resp = await fetch("/pending-orders/executed", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    
+    if (await handleFetchError(resp)) return;
+    
+    if (!resp.ok) {
+      const errorData = await resp.json().catch(() => ({}));
+      throw new Error(errorData.detail || `HTTP ${resp.status}`);
+    }
+    
+    const result = await resp.json();
+    alert(`✓ ${result.message || `成功清除 ${result.deleted_count || 0} 個訂單`}`);
+    
+    // 重新載入 Pending Orders
+    await loadPendingOrders();
+  } catch (error) {
+    console.error("清除 EXECUTED pending orders 失敗:", error);
+    alert(`清除失敗：${error.message}`);
+  }
+}
+
 // 將函數添加到全局作用域（用於 onclick 事件）
 window.approvePendingOrder = approvePendingOrder;
 window.rejectPendingOrder = rejectPendingOrder;
@@ -4803,6 +4837,14 @@ document.addEventListener("DOMContentLoaded", function() {
   if (refreshPendingOrdersBtn) {
     refreshPendingOrdersBtn.addEventListener("click", () => {
       loadPendingOrders();
+    });
+  }
+  
+  // 綁定清除 EXECUTED pending orders 按鈕
+  const clearExecutedPendingOrdersBtn = document.getElementById("btn-clear-executed-pending-orders");
+  if (clearExecutedPendingOrdersBtn) {
+    clearExecutedPendingOrdersBtn.addEventListener("click", () => {
+      clearExecutedPendingOrders();
     });
   }
   

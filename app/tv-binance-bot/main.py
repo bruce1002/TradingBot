@@ -7510,6 +7510,61 @@ async def reject_pending_order(
     }
 
 
+@app.delete("/pending-orders/executed", response_model=dict)
+async def clear_executed_pending_orders(
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    清除所有狀態為 EXECUTED 的待批准訂單
+    
+    此端點會刪除所有 status='EXECUTED' 的 pending orders，用於清理已完成執行的訂單記錄。
+    只會刪除 EXECUTED 狀態的訂單，不會影響 PENDING、REJECTED、FAILED 等狀態的訂單。
+    
+    此端點僅限已登入且通過管理員驗證的使用者使用。
+    
+    Args:
+        user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+        db: 資料庫 Session
+    
+    Returns:
+        dict: 刪除結果，包含刪除的數量
+    
+    Raises:
+        HTTPException: 當資料庫操作失敗時
+    """
+    try:
+        # 查詢所有 EXECUTED 狀態的 pending orders
+        executed_orders = db.query(PendingOrder).filter(PendingOrder.status == "EXECUTED").all()
+        
+        count = len(executed_orders)
+        
+        if count == 0:
+            return {
+                "success": True,
+                "message": "沒有 EXECUTED 狀態的訂單需要清除",
+                "deleted_count": 0
+            }
+        
+        # 刪除所有 EXECUTED 狀態的訂單
+        for order in executed_orders:
+            db.delete(order)
+        
+        db.commit()
+        
+        logger.info(f"清除 {count} 個 EXECUTED 狀態的 pending orders")
+        
+        return {
+            "success": True,
+            "message": f"成功清除 {count} 個 EXECUTED 狀態的訂單",
+            "deleted_count": count
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"清除 EXECUTED pending orders 失敗: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"清除失敗: {str(e)}")
+
+
 @app.post("/positions/{pos_id}/close", response_model=dict)
 async def close_position(
     pos_id: int,
