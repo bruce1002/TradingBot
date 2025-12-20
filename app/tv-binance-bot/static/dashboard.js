@@ -2929,6 +2929,248 @@ async function bulkUpdateTradingMode() {
   }
 }
 
+// ==================== Pending Orders ====================
+
+// 載入 Pending Orders
+async function loadPendingOrders() {
+  const container = document.getElementById("pending-orders-table-container");
+  if (!container) return;
+  
+  const existingTable = container.querySelector("table");
+  const isFirstLoad = !existingTable;
+  
+  if (isFirstLoad) {
+    container.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div> 載入中...</div>';
+  } else {
+    showTableLoading(container);
+  }
+  
+  try {
+    // 取得篩選條件
+    const statusFilter = document.getElementById("filter-pending-status")?.value || "";
+    const botIdFilter = document.getElementById("filter-pending-bot-id")?.value || "";
+    
+    const params = [];
+    if (statusFilter) params.push(`status=${statusFilter}`);
+    if (botIdFilter) params.push(`bot_id=${botIdFilter}`);
+    
+    const url = params.length > 0 ? `/pending-orders?${params.join("&")}` : "/pending-orders";
+    const response = await fetch(url);
+    
+    if (await handleFetchError(response)) return;
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    renderPendingOrdersTable(data);
+    hideTableLoading(container);
+  } catch (error) {
+    console.error("載入 Pending Orders 失敗:", error);
+    hideTableLoading(container);
+    if (isFirstLoad) {
+      container.innerHTML = `<div class="empty-state">載入失敗: ${error.message}</div>`;
+    }
+  }
+}
+
+// 渲染 Pending Orders 表格
+function renderPendingOrdersTable(data) {
+  const container = document.getElementById("pending-orders-table-container");
+  if (!container) return;
+  
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="empty-state">目前沒有待批准的訂單</div>';
+    return;
+  }
+  
+  const existingTable = container.querySelector("table");
+  const existingTbody = existingTable ? existingTable.querySelector("tbody") : null;
+  
+  function generatePendingOrderRowHtml(order, index) {
+    const rowAlt = (index % 2) === 1;
+    
+    // Status badge
+    let statusClass = "";
+    let statusText = order.status;
+    if (order.status === "PENDING") {
+      statusClass = "status-closing";  // Yellow/warning
+    } else if (order.status === "EXECUTED") {
+      statusClass = "status-open";  // Green
+    } else if (order.status === "REJECTED") {
+      statusClass = "status-closed";  // Gray
+    } else if (order.status === "FAILED") {
+      statusClass = "status-error";  // Red
+    } else if (order.status === "APPROVED") {
+      statusClass = "status-open";  // Green (being processed)
+    }
+    
+    // Side display
+    const sideDisplay = order.side || "-";
+    
+    // Mode display
+    const modeDisplay = order.is_position_based 
+      ? (order.position_size > 0 ? "LONG" : order.position_size < 0 ? "SHORT" : "CLOSE")
+      : (order.side === "BUY" ? "LONG" : order.side === "SELL" ? "SHORT" : order.side);
+    
+    // Quantity display
+    const qtyDisplay = order.qty !== null && order.qty !== undefined 
+      ? fmtNumber(order.qty, 6) 
+      : "-";
+    
+    // Position size display
+    const positionSizeDisplay = order.position_size !== null && order.position_size !== undefined
+      ? fmtNumber(order.position_size, 2)
+      : "-";
+    
+    // Time display
+    const createdTime = order.created_at ? new Date(order.created_at).toLocaleString("zh-TW") : "-";
+    
+    // Actions (only show for PENDING status)
+    let actionsHtml = "";
+    if (order.status === "PENDING") {
+      actionsHtml = `
+        <div class="action-buttons">
+          <button class="action-btn action-btn-enable" onclick="approvePendingOrder(${order.id})" title="批准並執行訂單">Approve</button>
+          <button class="action-btn action-btn-delete" onclick="rejectPendingOrder(${order.id})" title="拒絕訂單">Reject</button>
+        </div>
+      `;
+    } else {
+      actionsHtml = `<span style="color: var(--tbl-muted);">—</span>`;
+    }
+    
+    return `
+      <tr class="${rowAlt ? "row-alt" : ""}">
+        <td><strong>${order.id || "-"}</strong></td>
+        <td>${order.bot_id || "-"}</td>
+        <td><a href="#" onclick="openTradingViewChart('${order.symbol || ""}'); return false;" class="symbol-link" title="點擊打開 TradingView 圖表">${order.symbol || "-"}</a></td>
+        <td class="text-center">${sideDisplay}</td>
+        <td class="text-center">${modeDisplay}</td>
+        <td class="text-right">${qtyDisplay}</td>
+        <td class="text-center">${order.is_position_based ? positionSizeDisplay : "—"}</td>
+        <td class="text-center"><span class="${statusClass}">${statusText}</span></td>
+        <td>${createdTime}</td>
+        <td class="text-center">${order.position_id || "—"}</td>
+        <td class="text-center">${actionsHtml}</td>
+      </tr>
+    `;
+  }
+  
+  if (existingTbody) {
+    // Update existing table
+    let tbodyHtml = "";
+    data.forEach((order, index) => {
+      tbodyHtml += generatePendingOrderRowHtml(order, index);
+    });
+    existingTbody.innerHTML = tbodyHtml;
+    return;
+  }
+  
+  // Create new table
+  let html = `
+    <table class="positions-table">
+      <thead>
+        <tr>
+          <th class="text-center">ID</th>
+          <th class="text-center">Bot ID</th>
+          <th>Symbol</th>
+          <th class="text-center">Side</th>
+          <th class="text-center">Mode</th>
+          <th class="text-right">Qty</th>
+          <th class="text-center">Position Size</th>
+          <th class="text-center">Status</th>
+          <th>Created At</th>
+          <th class="text-center">Position ID</th>
+          <th class="text-center">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+  
+  data.forEach((order, index) => {
+    html += generatePendingOrderRowHtml(order, index);
+  });
+  
+  html += `
+      </tbody>
+    </table>
+  `;
+  
+  container.innerHTML = html;
+}
+
+// 批准 Pending Order
+async function approvePendingOrder(orderId) {
+  if (!confirm(`確定要批准訂單 #${orderId} 嗎？\n\n此操作會立即執行交易。`)) {
+    return;
+  }
+  
+  try {
+    const resp = await fetch(`/pending-orders/${orderId}/approve`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    
+    if (await handleFetchError(resp)) return;
+    
+    if (!resp.ok) {
+      const errorData = await resp.json().catch(() => ({}));
+      throw new Error(errorData.detail || `HTTP ${resp.status}`);
+    }
+    
+    const result = await resp.json();
+    alert(`✓ ${result.message || "訂單已批准並執行"}`);
+    
+    // 重新載入 Pending Orders
+    await loadPendingOrders();
+    
+    // 重新載入 Positions（因為可能建立了新倉位）
+    await loadPositions();
+  } catch (error) {
+    console.error("批准訂單失敗:", error);
+    alert(`批准失敗：${error.message}`);
+  }
+}
+
+// 拒絕 Pending Order
+async function rejectPendingOrder(orderId) {
+  if (!confirm(`確定要拒絕訂單 #${orderId} 嗎？\n\n此訂單將被標記為已拒絕，不會執行任何交易。`)) {
+    return;
+  }
+  
+  try {
+    const resp = await fetch(`/pending-orders/${orderId}/reject`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+    
+    if (await handleFetchError(resp)) return;
+    
+    if (!resp.ok) {
+      const errorData = await resp.json().catch(() => ({}));
+      throw new Error(errorData.detail || `HTTP ${resp.status}`);
+    }
+    
+    const result = await resp.json();
+    alert(`✓ ${result.message || "訂單已拒絕"}`);
+    
+    // 重新載入 Pending Orders
+    await loadPendingOrders();
+  } catch (error) {
+    console.error("拒絕訂單失敗:", error);
+    alert(`拒絕失敗：${error.message}`);
+  }
+}
+
+// 將函數添加到全局作用域（用於 onclick 事件）
+window.approvePendingOrder = approvePendingOrder;
+window.rejectPendingOrder = rejectPendingOrder;
+
 // ==================== Bot Form Functions ====================
 
 // 初始化 Symbol 建議清單
@@ -4537,6 +4779,33 @@ document.addEventListener("DOMContentLoaded", function() {
   loadTrailingSettings();  // 載入 Trailing 設定
   loadBotPositionsStats();  // 載入統計數據
   
+  // 初始化 Pending Orders 篩選按鈕
+  const applyPendingFilterBtn = document.getElementById("apply-pending-filter-btn");
+  const clearPendingFilterBtn = document.getElementById("clear-pending-filter-btn");
+  const refreshPendingOrdersBtn = document.getElementById("btn-refresh-pending-orders");
+  
+  if (applyPendingFilterBtn) {
+    applyPendingFilterBtn.addEventListener("click", () => {
+      loadPendingOrders();
+    });
+  }
+  
+  if (clearPendingFilterBtn) {
+    clearPendingFilterBtn.addEventListener("click", () => {
+      const statusFilter = document.getElementById("filter-pending-status");
+      const botIdFilter = document.getElementById("filter-pending-bot-id");
+      if (statusFilter) statusFilter.value = "";
+      if (botIdFilter) botIdFilter.value = "";
+      loadPendingOrders();
+    });
+  }
+  
+  if (refreshPendingOrdersBtn) {
+    refreshPendingOrdersBtn.addEventListener("click", () => {
+      loadPendingOrders();
+    });
+  }
+  
   // 初始化 Signal Detail Modal 關閉按鈕
   const modalCloseBtn = document.getElementById("signal-detail-close");
   const modal = document.getElementById("signal-detail-modal");
@@ -4733,6 +5002,11 @@ document.addEventListener("DOMContentLoaded", function() {
           initBotsTab();
           document.getElementById("bot-create-form").setAttribute("data-initialized", "true");
         }
+      } else if (tab === "pending") {
+        document
+          .getElementById("pending-container")
+          .classList.add("active");
+        loadPendingOrders();  // 載入 Pending Orders
       }
     });
   });

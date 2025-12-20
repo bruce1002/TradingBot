@@ -27,6 +27,7 @@
                     <button class="tab-button" data-tab="binance">Binance Live Positions</button>
                     <button class="tab-button" data-tab="signals">Signals</button>
                     <button class="tab-button" data-tab="bots">Bots</button>
+                    <button class="tab-button" data-tab="pending">Pending Orders</button>
                 </div>
             </div>
             
@@ -517,6 +518,48 @@
                 </div>
                 
                 <div id="bots-table-container">
+                    <!-- 載入中... -->
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        載入中...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pending Orders -->
+            <div id="pending-container" class="positions-container">
+                <div class="bots-header-row">
+                    <h2 class="section-title">Pending Orders</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="btn-refresh-pending-orders" class="action-btn">Refresh</button>
+                    </div>
+                </div>
+                
+                <!-- Filter Section -->
+                <div class="positions-filter-section">
+                    <h3>Filter Pending Orders</h3>
+                    <div class="filter-row">
+                        <label>
+                            Status:
+                            <select id="filter-pending-status">
+                                <option value="">All</option>
+                                <option value="PENDING">PENDING</option>
+                                <option value="APPROVED">APPROVED</option>
+                                <option value="REJECTED">REJECTED</option>
+                                <option value="EXECUTED">EXECUTED</option>
+                                <option value="FAILED">FAILED</option>
+                            </select>
+                        </label>
+                        <label>
+                            Bot ID:
+                            <input type="number" id="filter-pending-bot-id" placeholder="Filter by Bot ID" />
+                        </label>
+                        <button id="apply-pending-filter-btn" class="action-btn">Apply Filter</button>
+                        <button id="clear-pending-filter-btn" class="btn-secondary">Clear</button>
+                    </div>
+                </div>
+                
+                <div id="pending-orders-table-container">
                     <!-- 載入中... -->
                     <div class="loading-state">
                         <div class="loading-spinner"></div>
