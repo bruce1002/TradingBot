@@ -382,10 +382,22 @@
                 <div class="bots-header-row">
                     <h2 class="section-title">Bots</h2>
                     <div style="display: flex; gap: 10px;">
-                        <!-- Bulk Update Invest Amount Section -->
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <input type="number" step="0.01" min="0" id="bulk-update-invest-amount" placeholder="Investment (USDT)" style="width: 150px; padding: 6px 10px; background-color: var(--tbl-bg); border: 1px solid var(--tbl-border); color: var(--tbl-text); border-radius: 4px;" />
-                            <button id="btn-bulk-update-invest-amount" class="action-btn" style="padding: 6px 16px;">Update All Bots</button>
+                        <!-- Bulk Update Sections -->
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <!-- Bulk Update Invest Amount Section -->
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input type="number" step="0.01" min="0" id="bulk-update-invest-amount" placeholder="Investment (USDT)" style="width: 150px; padding: 6px 10px; background-color: var(--tbl-bg); border: 1px solid var(--tbl-border); color: var(--tbl-text); border-radius: 4px;" />
+                                <button id="btn-bulk-update-invest-amount" class="action-btn" style="padding: 6px 16px;">Update All Bots</button>
+                            </div>
+                            <!-- Bulk Update Trading Mode Section -->
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <select id="bulk-update-trading-mode" style="width: 150px; padding: 6px 10px; background-color: var(--tbl-bg); border: 1px solid var(--tbl-border); color: var(--tbl-text); border-radius: 4px;">
+                                    <option value="auto">Full-Auto</option>
+                                    <option value="semi-auto">Semi-Auto</option>
+                                    <option value="manual">Manual</option>
+                                </select>
+                                <button id="btn-bulk-update-trading-mode" class="action-btn" style="padding: 6px 16px;">Update All Trading Mode</button>
+                            </div>
                         </div>
                         <button id="btn-open-bot-form" class="action-btn">New Bot</button>
                     </div>

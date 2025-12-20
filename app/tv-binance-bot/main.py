@@ -5684,6 +5684,90 @@ async def bulk_update_invest_amount(
         raise HTTPException(status_code=500, detail=f"批量更新失敗: {str(e)}")
 
 
+# ==================== Bulk Update Trading Mode ====================
+
+class BulkUpdateTradingModeRequest(BaseModel):
+    """批量更新所有 Bot 的交易模式請求格式"""
+    trading_mode: str = Field(..., description="交易模式：auto, semi-auto, manual")
+    bot_ids: Optional[List[int]] = Field(None, description="可選的 Bot ID 列表，如果提供則僅更新這些 Bot，否則更新所有 Bot")
+
+
+@app.post("/bots/bulk-update-trading-mode")
+async def bulk_update_trading_mode(
+    request: BulkUpdateTradingModeRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_admin_user)
+):
+    """
+    批量更新所有 Bot 的交易模式（trading_mode）
+    
+    僅限已登入的管理員使用。
+    可以一次更新所有 Bot，或僅更新指定的 Bot IDs。
+    
+    Args:
+        request: 包含 trading_mode 和可選的 bot_ids
+        db: 資料庫 Session
+        user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+    
+    Returns:
+        dict: 包含以下欄位的字典：
+            - success: 是否成功
+            - updated_count: 更新的 Bot 數量
+            - bot_ids: 已更新的 Bot ID 列表
+            - message: 操作結果訊息
+    
+    Raises:
+        HTTPException: 當 trading_mode 無效時
+    """
+    # 驗證 trading_mode
+    if request.trading_mode not in ["auto", "semi-auto", "manual"]:
+        raise HTTPException(status_code=400, detail="trading_mode 必須是 'auto', 'semi-auto' 或 'manual'")
+    
+    try:
+        # 查詢要更新的 Bot
+        if request.bot_ids is not None and len(request.bot_ids) > 0:
+            # 僅更新指定的 Bot
+            bots = db.query(BotConfig).filter(BotConfig.id.in_(request.bot_ids)).all()
+            if not bots:
+                raise HTTPException(status_code=404, detail=f"找不到指定的 Bot IDs: {request.bot_ids}")
+        else:
+            # 更新所有 Bot
+            bots = db.query(BotConfig).all()
+        
+        # 更新每個 Bot 的 trading_mode
+        updated_ids = []
+        for bot in bots:
+            bot.trading_mode = request.trading_mode
+            bot.updated_at = datetime.now(timezone.utc)
+            updated_ids.append(bot.id)
+            logger.info(f"更新 Bot {bot.id} ({bot.name}) 的 trading_mode 為 {request.trading_mode}")
+        
+        # 提交變更
+        db.commit()
+        
+        mode_display = {
+            "auto": "Full-Auto",
+            "semi-auto": "Semi-Auto",
+            "manual": "Manual"
+        }.get(request.trading_mode, request.trading_mode)
+        
+        success_msg = f"成功更新 {len(updated_ids)} 個 Bot 的交易模式為 {mode_display}"
+        logger.info(success_msg)
+        
+        return {
+            "success": True,
+            "updated_count": len(updated_ids),
+            "bot_ids": updated_ids,
+            "message": success_msg
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"批量更新 Bot 交易模式失敗: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"批量更新失敗: {str(e)}")
+
+
 # ==================== Position Stop Config API ====================
 
 class PositionStopConfigUpdate(BaseModel):

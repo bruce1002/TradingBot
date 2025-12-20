@@ -2797,6 +2797,138 @@ async function bulkUpdateInvestAmount() {
   }
 }
 
+// 批量更新所有 Bot 的交易模式
+async function bulkUpdateTradingMode() {
+  const select = document.getElementById("bulk-update-trading-mode");
+  const resultDiv = document.getElementById("bulk-update-result");
+  
+  if (!select) {
+    console.error("bulk-update-trading-mode select not found");
+    return;
+  }
+  if (!resultDiv) {
+    console.error("bulk-update-result div not found");
+    return;
+  }
+  
+  const tradingMode = select.value;
+  
+  // 驗證輸入
+  if (!tradingMode || !["auto", "semi-auto", "manual"].includes(tradingMode)) {
+    resultDiv.style.display = "block";
+    resultDiv.style.backgroundColor = "#ff6b6b";
+    resultDiv.style.color = "#fff";
+    resultDiv.style.border = "1px solid #ff6b6b";
+    resultDiv.textContent = "請選擇有效的交易模式";
+    setTimeout(() => {
+      resultDiv.style.display = "none";
+    }, 5000);
+    return;
+  }
+  
+  // 獲取按鈕並保存原始文字
+  const btn = document.getElementById("btn-bulk-update-trading-mode");
+  if (!btn) {
+    console.error("btn-bulk-update-trading-mode button not found");
+    return;
+  }
+  
+  // 防止重複點擊
+  if (btn.disabled || btn.textContent === "更新中...") {
+    console.log("Update already in progress, ignoring duplicate click");
+    return;
+  }
+  
+  const originalText = btn.textContent || "Update All Trading Mode";
+  
+  // 確認對話框
+  const modeDisplay = {
+    "auto": "Full-Auto (自動執行)",
+    "semi-auto": "Semi-Auto (需批准)",
+    "manual": "Manual (僅手動)"
+  }[tradingMode] || tradingMode;
+  
+  const confirmMsg = `確定要將所有 Bot 的交易模式更新為 ${modeDisplay} 嗎？\n\n此操作會影響所有 Bot 的設定。`;
+  const confirmed = window.confirm(confirmMsg);
+  if (!confirmed) {
+    return;
+  }
+  
+  // 禁用按鈕並顯示載入狀態
+  btn.disabled = true;
+  btn.textContent = "更新中...";
+  
+  try {
+    const resp = await fetch("/bots/bulk-update-trading-mode", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        trading_mode: tradingMode
+      }),
+    });
+    
+    if (await handleFetchError(resp)) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+      return;
+    }
+    
+    if (!resp.ok) {
+      let errorMessage = `HTTP ${resp.status}`;
+      try {
+        const errorData = await resp.json();
+        errorMessage = errorData.detail || errorData.message || errorMessage;
+      } catch (e) {
+        const text = await resp.text().catch(() => "");
+        if (text) {
+          errorMessage = text;
+        }
+      }
+      throw new Error(errorMessage);
+    }
+    
+    const result = await resp.json();
+    
+    // 顯示成功訊息
+    resultDiv.style.display = "block";
+    resultDiv.style.backgroundColor = "#40ffb3";
+    resultDiv.style.color = "#11151f";
+    resultDiv.style.border = "1px solid #40ffb3";
+    resultDiv.textContent = `✓ ${result.message || `成功更新 ${result.updated_count} 個 Bot`}`;
+    
+    // 重新載入 Bots 列表
+    await loadBots();
+    
+    // 恢復按鈕狀態
+    btn.disabled = false;
+    btn.textContent = originalText;
+    
+    // 5 秒後隱藏訊息
+    setTimeout(() => {
+      resultDiv.style.display = "none";
+    }, 5000);
+    
+  } catch (error) {
+    console.error("批量更新交易模式失敗:", error);
+    resultDiv.style.display = "block";
+    resultDiv.style.backgroundColor = "#ff6b6b";
+    resultDiv.style.color = "#fff";
+    resultDiv.style.border = "1px solid #ff6b6b";
+    resultDiv.textContent = `✗ 更新失敗：${error.message}`;
+    
+    // 恢復按鈕狀態
+    btn.disabled = false;
+    btn.textContent = originalText;
+    
+    // 5 秒後隱藏訊息
+    setTimeout(() => {
+      resultDiv.style.display = "none";
+    }, 5000);
+  }
+}
+
 // ==================== Bot Form Functions ====================
 
 // 初始化 Symbol 建議清單
@@ -3416,6 +3548,23 @@ function initBotsTab() {
     }
   } else {
     console.warn("btn-bulk-update-invest-amount button not found");
+  }
+  
+  // 綁定批量更新交易模式按鈕
+  const bulkUpdateTradingModeBtn = document.getElementById("btn-bulk-update-trading-mode");
+  if (bulkUpdateTradingModeBtn) {
+    bulkUpdateTradingModeBtn.addEventListener("click", function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        bulkUpdateTradingMode();
+      } catch (error) {
+        console.error("Error in bulkUpdateTradingMode:", error);
+        alert("發生錯誤：" + error.message);
+      }
+    });
+  } else {
+    console.warn("btn-bulk-update-trading-mode button not found");
   }
   
   const openBtn = document.getElementById("btn-open-bot-form");
