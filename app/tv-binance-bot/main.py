@@ -2720,45 +2720,67 @@ async def webhook_tradingview(
                     results.append(f"bot={bot.id}, skipped=manual_mode")
                     continue
                 elif trading_mode == "semi-auto":
-                    # Semi-auto 模式：將訊號加入待批准佇列
-                    logger.info(f"Bot {bot.id} ({bot.name}) 為 semi-auto 模式，將訊號加入待批准佇列")
-                    
-                    # 計算基本資訊（用於顯示）
-                    calculated_qty = None
-                    calculated_side = None
+                    # Semi-auto 模式：檢查是否為 CLOSE 訊號
                     is_position_based = signal.position_size is not None
+                    EPS = 1e-8
+                    is_close_signal = False
                     
-                    # 如果是訂單導向模式，嘗試計算 qty
-                    if not is_position_based:
-                        try:
-                            side = signal.side.upper()
-                            if not bot.use_signal_side and bot.fixed_side:
-                                side = bot.fixed_side.upper()
-                            calculated_side = side
-                            calculated_qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
-                        except Exception as e:
-                            logger.warning(f"Bot {bot.id} 計算 qty 失敗（將在批准時重新計算）: {e}")
+                    # 判斷是否為 CLOSE 訊號
+                    if is_position_based:
+                        # 位置導向模式：position_size == 0 表示平倉
+                        if abs(signal.position_size or 0) < EPS:
+                            is_close_signal = True
+                            logger.info(f"Bot {bot.id} ({bot.name}) 收到 CLOSE 訊號（position_size=0），在 semi-auto 模式下立即執行")
+                    else:
+                        # 訂單導向模式：檢查是否有現有倉位且訊號為平倉
+                        # 這裡假設如果有現有 OPEN 倉位，且訊號是相反的，則視為平倉
+                        # 但為了安全，我們主要針對 position-based 的 CLOSE 訊號
+                        # 訂單導向模式的 CLOSE 訊號通常需要通過其他方式判斷
+                        pass
                     
-                    # 建立 PendingOrder
-                    pending_order = PendingOrder(
-                        bot_id=bot.id,
-                        tv_signal_log_id=log.id,
-                        symbol=symbol,
-                        side=signal.side.upper(),
-                        qty=calculated_qty,
-                        position_size=signal.position_size,
-                        calculated_qty=calculated_qty,
-                        calculated_side=calculated_side,
-                        is_position_based=is_position_based,
-                        status="PENDING"
-                    )
-                    db.add(pending_order)
-                    db.commit()
-                    db.refresh(pending_order)
-                    
-                    results.append(f"bot={bot.id}, pending_order_id={pending_order.id}, queued=semi_auto")
-                    logger.info(f"Bot {bot.id} 訊號已加入待批准佇列 (pending_order_id={pending_order.id})")
-                    continue
+                    # 如果是 CLOSE 訊號，立即執行（不加入待批准佇列）
+                    if is_close_signal:
+                        logger.info(f"Bot {bot.id} ({bot.name}) CLOSE 訊號在 semi-auto 模式下立即執行，跳過批准流程")
+                        # 繼續執行流程（不 continue，讓它執行下面的關倉邏輯）
+                    else:
+                        # 非 CLOSE 訊號：將訊號加入待批准佇列
+                        logger.info(f"Bot {bot.id} ({bot.name}) 為 semi-auto 模式，將訊號加入待批准佇列")
+                        
+                        # 計算基本資訊（用於顯示）
+                        calculated_qty = None
+                        calculated_side = None
+                        
+                        # 如果是訂單導向模式，嘗試計算 qty
+                        if not is_position_based:
+                            try:
+                                side = signal.side.upper()
+                                if not bot.use_signal_side and bot.fixed_side:
+                                    side = bot.fixed_side.upper()
+                                calculated_side = side
+                                calculated_qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
+                            except Exception as e:
+                                logger.warning(f"Bot {bot.id} 計算 qty 失敗（將在批准時重新計算）: {e}")
+                        
+                        # 建立 PendingOrder
+                        pending_order = PendingOrder(
+                            bot_id=bot.id,
+                            tv_signal_log_id=log.id,
+                            symbol=symbol,
+                            side=signal.side.upper(),
+                            qty=calculated_qty,
+                            position_size=signal.position_size,
+                            calculated_qty=calculated_qty,
+                            calculated_side=calculated_side,
+                            is_position_based=is_position_based,
+                            status="PENDING"
+                        )
+                        db.add(pending_order)
+                        db.commit()
+                        db.refresh(pending_order)
+                        
+                        results.append(f"bot={bot.id}, pending_order_id={pending_order.id}, queued=semi_auto")
+                        logger.info(f"Bot {bot.id} 訊號已加入待批准佇列 (pending_order_id={pending_order.id})")
+                        continue
                 # else: trading_mode == "auto" - 繼續正常執行流程
                 
                 # 檢查是否使用位置導向模式
