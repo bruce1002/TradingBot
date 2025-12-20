@@ -477,8 +477,17 @@
                             </label>
                         </div>
 
-                        <!-- Fifth Row: Enabled -->
+                        <!-- Fifth Row: Trading Mode / Enabled -->
                         <div class="form-row">
+                            <label class="with-tooltip">
+                                Trading Mode <span class="required">*</span>
+                                <select id="bot-trading-mode" required>
+                                    <option value="auto" selected>Full-Auto (自動執行)</option>
+                                    <option value="semi-auto">Semi-Auto (需批准)</option>
+                                    <option value="manual">Manual (僅手動)</option>
+                                </select>
+                                <span class="tooltip-icon" title="Full-Auto: 訊號立即執行 | Semi-Auto: 訊號需使用者批准後執行 | Manual: 忽略訊號，僅手動交易">?</span>
+                            </label>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="bot-enabled" checked />
                                 <span>Enabled</span>

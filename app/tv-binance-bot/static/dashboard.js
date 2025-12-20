@@ -2403,6 +2403,11 @@ function sortBotsData(data, column, direction) {
           ? parseFloat(b.trailing_callback_percent) 
           : -1;
         return direction === 'asc' ? aVal - bVal : bVal - aVal;
+      case 'trading_mode':
+        const aMode = (a.trading_mode || 'auto').toLowerCase();
+        const bMode = (b.trading_mode || 'auto').toLowerCase();
+        // Order: auto, manual, semi-auto (alphabetical)
+        return direction === 'asc' ? aMode.localeCompare(bMode) : bMode.localeCompare(aMode);
       default:
         return 0;
     }
@@ -2443,6 +2448,21 @@ function renderBotsTable(data) {
       ? `${fmtNumber(bot.max_invest_usdt, 2)} USDT`
       : "-";
     
+    // Trading Mode Display
+    const tradingMode = bot.trading_mode || "auto";
+    let tradingModeDisplay = "";
+    let tradingModeClass = "";
+    if (tradingMode === "auto") {
+      tradingModeDisplay = "Full-Auto";
+      tradingModeClass = "status-open";  // Use green color
+    } else if (tradingMode === "semi-auto") {
+      tradingModeDisplay = "Semi-Auto";
+      tradingModeClass = "status-closing";  // Use warning/yellow color
+    } else if (tradingMode === "manual") {
+      tradingModeDisplay = "Manual";
+      tradingModeClass = "status-closed";  // Use gray color
+    }
+    
     const actionsHtml = `
       <div class="action-buttons">
         <button class="action-btn" onclick="openBotFormFromEdit(${bot.id})">Edit</button>
@@ -2466,6 +2486,7 @@ function renderBotsTable(data) {
         <td class="text-center">${bot.leverage || 0}x</td>
         <td class="text-right">${maxInvestDisplay}</td>
         <td>${signalDisplay}</td>
+        <td class="text-center"><span class="${tradingModeClass}">${tradingModeDisplay}</span></td>
         <td class="text-center">${trailingDisplay}</td>
         <td class="text-center">${actionsHtml}</td>
       </tr>
@@ -2508,6 +2529,7 @@ function renderBotsTable(data) {
           ${generateSortableTh('leverage', 'Leverage', 'text-center')}
           ${generateSortableTh('max_invest_usdt', 'Max Invest (USDT)', 'text-right')}
           ${generateSortableTh('signal', 'Signal', '')}
+          ${generateSortableTh('trading_mode', 'Trading Mode', 'text-center')}
           ${generateSortableTh('trailing', 'Trailing', 'text-center')}
           <th class="text-center">Actions</th>
         </tr>
@@ -2856,6 +2878,7 @@ function resetBotForm() {
   document.getElementById("bot-use-dynamic-stop").checked = true;
   document.getElementById("bot-trailing-callback-percent").value = "10";
   document.getElementById("bot-base-stop-loss-pct").value = "5.0";
+  document.getElementById("bot-trading-mode").value = "auto";  // Default: full-auto
   document.getElementById("bot-enabled").checked = true;
 
   const err = document.getElementById("bot-form-error");
@@ -2912,6 +2935,7 @@ async function onSubmitBotForm(event) {
   const useDynamicStop = document.getElementById("bot-use-dynamic-stop").checked;
   const trailingPct = document.getElementById("bot-trailing-callback-percent").value.trim();
   const baseSlPct = document.getElementById("bot-base-stop-loss-pct").value.trim();
+  const tradingMode = document.getElementById("bot-trading-mode").value;
   const enabled = document.getElementById("bot-enabled").checked;
 
   // 基本驗證
@@ -2979,6 +3003,7 @@ async function onSubmitBotForm(event) {
     payload.use_dynamic_stop = useDynamicStop;
     payload.trailing_callback_percent = trailingCallbackPercent;
     payload.base_stop_loss_pct = baseStopLossPct;
+    payload.trading_mode = tradingMode;
     payload.signal_id = signalId;
     
     // 編輯模式：如果 max_invest_usdt 被改變，需要密碼
@@ -3024,6 +3049,7 @@ async function onSubmitBotForm(event) {
     payload.use_dynamic_stop = useDynamicStop;
     payload.trailing_callback_percent = trailingCallbackPercent;
     payload.base_stop_loss_pct = baseStopLossPct;
+    payload.trading_mode = tradingMode;
     payload.signal_id = signalId;
     
     // 顯示確認模態框
@@ -3258,6 +3284,7 @@ async function openBotFormFromEdit(botId) {
     document.getElementById("bot-use-dynamic-stop").checked = bot.use_dynamic_stop !== false;
     document.getElementById("bot-trailing-callback-percent").value = bot.trailing_callback_percent || "";
     document.getElementById("bot-base-stop-loss-pct").value = bot.base_stop_loss_pct || "3.0";
+    document.getElementById("bot-trading-mode").value = bot.trading_mode || "auto";  // Default to auto if not set
     document.getElementById("bot-enabled").checked = bot.enabled !== false;
     
     // 設定 signal
