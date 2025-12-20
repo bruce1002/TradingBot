@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from db import init_db, get_db, SessionLocal
-from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig, PortfolioTrailingConfig
+from models import Position, TradingViewSignalLog, BotConfig, TVSignalConfig, PortfolioTrailingConfig, PendingOrder
 from binance_client import (
     get_client, 
     get_mark_price, 
@@ -1919,7 +1919,6 @@ class TVSignalConfigOut(TVSignalConfigBase):
     
     class Config:
         from_attributes = True
-        orm_mode = True
 
 
 class BotConfigBase(BaseModel):
@@ -1936,6 +1935,7 @@ class BotConfigBase(BaseModel):
     use_dynamic_stop: bool = True
     trailing_callback_percent: Optional[float] = None
     base_stop_loss_pct: float = 3.0
+    trading_mode: str = "auto"  # "auto", "semi-auto", "manual"
     signal_id: Optional[int] = None
 
 
@@ -1957,6 +1957,7 @@ class BotConfigUpdate(BaseModel):
     use_dynamic_stop: Optional[bool] = None
     trailing_callback_percent: Optional[float] = None
     base_stop_loss_pct: Optional[float] = None
+    trading_mode: Optional[str] = None  # "auto", "semi-auto", "manual"
     signal_id: Optional[int] = None
     max_invest_password: Optional[str] = Field(None, description="更新 max_invest_usdt 時需要的密碼")
 
@@ -1970,7 +1971,30 @@ class BotConfigOut(BotConfigBase):
     
     class Config:
         from_attributes = True
-        orm_mode = True
+
+
+class PendingOrderOut(BaseModel):
+    """Pending Order 回應格式"""
+    id: int
+    bot_id: int
+    tv_signal_log_id: int
+    symbol: str
+    side: str
+    qty: Optional[float] = None
+    position_size: Optional[float] = None
+    calculated_qty: Optional[float] = None
+    calculated_side: Optional[str] = None
+    is_position_based: bool
+    status: str
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    executed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    position_id: Optional[int] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 
 
 class WebhookResponse(BaseModel):
@@ -2686,6 +2710,56 @@ async def webhook_tradingview(
                         symbol = normalized_symbol
                 else:
                     symbol = normalized_symbol
+                
+                # 檢查交易模式
+                trading_mode = bot.trading_mode or "auto"  # 預設為 auto 以向後兼容
+                
+                if trading_mode == "manual":
+                    # Manual 模式：不處理訊號，僅記錄
+                    logger.info(f"Bot {bot.id} ({bot.name}) 為 manual 模式，跳過訊號處理")
+                    results.append(f"bot={bot.id}, skipped=manual_mode")
+                    continue
+                elif trading_mode == "semi-auto":
+                    # Semi-auto 模式：將訊號加入待批准佇列
+                    logger.info(f"Bot {bot.id} ({bot.name}) 為 semi-auto 模式，將訊號加入待批准佇列")
+                    
+                    # 計算基本資訊（用於顯示）
+                    calculated_qty = None
+                    calculated_side = None
+                    is_position_based = signal.position_size is not None
+                    
+                    # 如果是訂單導向模式，嘗試計算 qty
+                    if not is_position_based:
+                        try:
+                            side = signal.side.upper()
+                            if not bot.use_signal_side and bot.fixed_side:
+                                side = bot.fixed_side.upper()
+                            calculated_side = side
+                            calculated_qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
+                        except Exception as e:
+                            logger.warning(f"Bot {bot.id} 計算 qty 失敗（將在批准時重新計算）: {e}")
+                    
+                    # 建立 PendingOrder
+                    pending_order = PendingOrder(
+                        bot_id=bot.id,
+                        tv_signal_log_id=log.id,
+                        symbol=symbol,
+                        side=signal.side.upper(),
+                        qty=calculated_qty,
+                        position_size=signal.position_size,
+                        calculated_qty=calculated_qty,
+                        calculated_side=calculated_side,
+                        is_position_based=is_position_based,
+                        status="PENDING"
+                    )
+                    db.add(pending_order)
+                    db.commit()
+                    db.refresh(pending_order)
+                    
+                    results.append(f"bot={bot.id}, pending_order_id={pending_order.id}, queued=semi_auto")
+                    logger.info(f"Bot {bot.id} 訊號已加入待批准佇列 (pending_order_id={pending_order.id})")
+                    continue
+                # else: trading_mode == "auto" - 繼續正常執行流程
                 
                 # 檢查是否使用位置導向模式
                 target_position_size = signal.position_size
@@ -5048,6 +5122,7 @@ async def list_bots(
             "use_dynamic_stop": bot.use_dynamic_stop,
             "trailing_callback_percent": bot.trailing_callback_percent,
             "base_stop_loss_pct": bot.base_stop_loss_pct,
+            "trading_mode": bot.trading_mode or "auto",
             "signal_id": bot.signal_id,
             "created_at": bot.created_at,
             "updated_at": bot.updated_at,
@@ -5108,6 +5183,10 @@ async def create_bot(
         if bot.trailing_callback_percent < 0 or bot.trailing_callback_percent > 100:
             raise HTTPException(status_code=400, detail="trailing_callback_percent 必須在 0~100 之間")
     
+    # 驗證 trading_mode
+    if bot.trading_mode not in ["auto", "semi-auto", "manual"]:
+        raise HTTPException(status_code=400, detail="trading_mode 必須是 'auto', 'semi-auto' 或 'manual'")
+    
     # 如果 use_signal_side=True，則自動將 fixed_side=None
     if bot.use_signal_side:
         bot.fixed_side = None
@@ -5145,6 +5224,7 @@ async def create_bot(
         use_dynamic_stop=bot.use_dynamic_stop,
         trailing_callback_percent=bot.trailing_callback_percent,
         base_stop_loss_pct=bot.base_stop_loss_pct,
+        trading_mode=bot.trading_mode,
         signal_id=bot.signal_id,
     )
     
@@ -5180,6 +5260,7 @@ async def create_bot(
             "use_dynamic_stop": db_bot.use_dynamic_stop,
             "trailing_callback_percent": db_bot.trailing_callback_percent,
             "base_stop_loss_pct": db_bot.base_stop_loss_pct,
+            "trading_mode": db_bot.trading_mode or "auto",
             "signal_id": db_bot.signal_id,
             "created_at": db_bot.created_at,
             "updated_at": db_bot.updated_at,
@@ -5346,6 +5427,11 @@ async def update_bot(
         if update_data["trailing_callback_percent"] < 0 or update_data["trailing_callback_percent"] > 100:
             raise HTTPException(status_code=400, detail="trailing_callback_percent 必須在 0~100 之間")
     
+    # 驗證 trading_mode
+    if "trading_mode" in update_data and update_data["trading_mode"] is not None:
+        if update_data["trading_mode"] not in ["auto", "semi-auto", "manual"]:
+            raise HTTPException(status_code=400, detail="trading_mode 必須是 'auto', 'semi-auto' 或 'manual'")
+    
     # 如果 use_signal_side=True，則自動將 fixed_side=None
     if update_data.get("use_signal_side") is True:
         update_data["fixed_side"] = None
@@ -5364,9 +5450,9 @@ async def update_bot(
         if not signal_config.enabled:
             raise HTTPException(status_code=400, detail=f"Signal Config {update_data['signal_id']} 未啟用，無法關聯到此 Bot")
     
-    # 更新
+    # 更新（排除 max_invest_password，它只用於驗證，不應存儲）
     for key, value in update_data.items():
-        if value is not None:
+        if key != "max_invest_password" and value is not None:
             setattr(bot, key, value)
     
     # 自動更新 updated_at（SQLAlchemy 的 onupdate 會處理，但我們確保一下）
@@ -6607,6 +6693,736 @@ async def delete_position_record(
         "message": f"Position {pos_id} ({symbol}) 已刪除",
         "position_id": pos_id,
         "status": status,
+    }
+
+
+@app.get("/pending-orders", response_model=List[PendingOrderOut])
+async def get_pending_orders(
+    status: Optional[str] = None,
+    bot_id: Optional[int] = None,
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    查詢待批准訂單
+    
+    此端點僅限已登入且通過管理員驗證的使用者使用。
+    
+    Args:
+        status: 狀態篩選（可選），例如 "PENDING", "APPROVED", "REJECTED", "EXECUTED", "FAILED"
+        bot_id: Bot ID 篩選（可選）
+        user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+        db: 資料庫 Session
+    
+    Returns:
+        List[PendingOrderOut]: 待批准訂單列表
+    """
+    query = db.query(PendingOrder)
+    
+    if status:
+        query = query.filter(PendingOrder.status == status.upper())
+    
+    if bot_id:
+        query = query.filter(PendingOrder.bot_id == bot_id)
+    
+    pending_orders = query.order_by(PendingOrder.created_at.desc()).all()
+    
+    return [PendingOrderOut(**po.to_dict()) for po in pending_orders]
+
+
+@app.post("/pending-orders/{order_id}/approve", response_model=dict)
+async def approve_pending_order(
+    order_id: int,
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    批准並執行待批准訂單
+    
+    此端點會執行待批准訂單，將其狀態更新為 EXECUTED 或 FAILED。
+    執行邏輯與 webhook 處理相同（auto 模式）。
+    
+    此端點僅限已登入且通過管理員驗證的使用者使用。
+    
+    Args:
+        order_id: Pending Order ID
+        user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+        db: 資料庫 Session
+    
+    Returns:
+        dict: 執行結果，包含 success, message, position_id（如果成功）等
+    
+    Raises:
+        HTTPException: 當訂單不存在或狀態不正確時
+    """
+    pending_order = db.query(PendingOrder).filter(PendingOrder.id == order_id).first()
+    if not pending_order:
+        raise HTTPException(status_code=404, detail=f"找不到 pending_order {order_id}")
+    
+    if pending_order.status != "PENDING":
+        raise HTTPException(status_code=400, detail=f"訂單狀態為 {pending_order.status}，無法批准（僅 PENDING 狀態可批准）")
+    
+    # 取得 Bot 和 Signal Log
+    bot = db.query(BotConfig).filter(BotConfig.id == pending_order.bot_id).first()
+    if not bot:
+        raise HTTPException(status_code=404, detail=f"找不到 bot {pending_order.bot_id}")
+    
+    signal_log = db.query(TradingViewSignalLog).filter(TradingViewSignalLog.id == pending_order.tv_signal_log_id).first()
+    if not signal_log:
+        raise HTTPException(status_code=404, detail=f"找不到 signal_log {pending_order.tv_signal_log_id}")
+    
+    # 更新狀態為 APPROVED
+    pending_order.status = "APPROVED"
+    pending_order.approved_at = datetime.now(timezone.utc)
+    db.commit()
+    
+    try:
+        # 重建 signal 物件
+        from pydantic import BaseModel as PydanticBaseModel
+        signal_data = {
+            "secret": "approved",  # 不需要驗證，因為已經通過管理員認證
+            "symbol": pending_order.symbol,
+            "side": signal_log.side,
+            "qty": signal_log.qty,
+            "position_size": signal_log.position_size,
+        }
+        
+        # 決定使用 signal_key 還是 bot_key
+        if signal_log.signal_id:
+            signal_config = db.query(TVSignalConfig).filter(TVSignalConfig.id == signal_log.signal_id).first()
+            if signal_config:
+                signal_data["signal_key"] = signal_config.signal_key
+        if signal_log.bot_key:
+            signal_data["bot_key"] = signal_log.bot_key
+        
+        signal = TradingViewSignalIn(**signal_data)
+        
+        # 執行訂單（重用 webhook 的執行邏輯，但只針對這個 bot）
+        client = get_client()
+        EPS = 1e-8
+        symbol = pending_order.symbol
+        target_position_size = signal.position_size
+        
+        if target_position_size is None:
+            # 訂單導向模式
+            side = signal.side.upper()
+            if not bot.use_signal_side and bot.fixed_side:
+                side = bot.fixed_side.upper()
+            
+            if side not in ["BUY", "SELL"]:
+                raise ValueError(f"無效的下單方向: {side}")
+            
+            qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
+            
+            try:
+                client.futures_change_leverage(symbol=symbol, leverage=bot.leverage)
+                logger.info(f"成功設定 {symbol} 杠桿為 {bot.leverage}x")
+            except Exception as e:
+                logger.warning(f"設定杠桿時發生警告: {e}")
+            
+            timestamp = int(time.time() * 1000)
+            client_order_id = f"bot_{bot.id}_{timestamp}_approved"
+            
+            formatted_qty = format_quantity(symbol, qty)
+            formatted_qty_float = float(formatted_qty)
+            
+            order = client.futures_create_order(
+                symbol=symbol,
+                side="BUY" if side == "BUY" else "SELL",
+                type="MARKET",
+                quantity=formatted_qty,
+                newClientOrderId=client_order_id
+            )
+            
+            entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
+            
+            position_side = "LONG" if side == "BUY" else "SHORT"
+            trail_callback = None
+            if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                trail_callback = bot.trailing_callback_percent / 100.0
+            
+            position = Position(
+                bot_id=bot.id,
+                tv_signal_log_id=signal_log.id,
+                symbol=symbol,
+                side=position_side,
+                qty=formatted_qty_float,
+                status="OPEN",
+                binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                client_order_id=order.get("clientOrderId"),
+                entry_price=entry_price,
+                trail_callback=trail_callback,
+                highest_price=entry_price if trail_callback else None,
+            )
+            db.add(position)
+            db.commit()
+            db.refresh(position)
+            
+            # 更新 pending_order
+            pending_order.status = "EXECUTED"
+            pending_order.executed_at = datetime.now(timezone.utc)
+            pending_order.position_id = position.id
+            db.commit()
+            
+            logger.info(f"Pending order {order_id} 已批准並執行，建立 Position {position.id}")
+            
+            return {
+                "success": True,
+                "message": f"訂單已批准並執行",
+                "pending_order_id": order_id,
+                "position_id": position.id,
+            }
+        else:
+            # ========== 位置導向模式 ==========
+            target_position_size = pending_order.position_size
+            EPS = 1e-8
+            
+            # 正規化 target（將非常小的值視為 0）
+            if abs(target_position_size) < EPS:
+                target_position_size = 0.0
+            
+            # 取得當前倉位
+            current_position, current_qty_signed = get_current_position_signed_qty(db, bot.id, symbol)
+            
+            logger.info(
+                f"Pending order {order_id} 位置導向模式: "
+                f"symbol={symbol}, target_direction={'LONG' if target_position_size > 0 else 'SHORT' if target_position_size < 0 else 'CLOSE'}, "
+                f"current={current_qty_signed}"
+            )
+            
+            # 設定杠桿
+            try:
+                client.futures_change_leverage(symbol=symbol, leverage=bot.leverage)
+                logger.info(f"成功設定 {symbol} 杠桿為 {bot.leverage}x")
+            except Exception as e:
+                logger.warning(f"設定杠桿時發生警告: {e}")
+            
+            # Case A: 目標為平倉 (target == 0)
+            if abs(target_position_size) < EPS:
+                if abs(current_qty_signed) < EPS:
+                    # 已經平倉，無需操作
+                    pending_order.status = "EXECUTED"
+                    pending_order.executed_at = datetime.now(timezone.utc)
+                    pending_order.error_message = "Already flat, no action needed"
+                    db.commit()
+                    return {
+                        "success": True,
+                        "message": "目標為平倉，當前已無倉位，無需操作",
+                        "pending_order_id": order_id,
+                    }
+                else:
+                    # 關閉現有倉位
+                    if not current_position:
+                        raise HTTPException(status_code=400, detail="目標為平倉，但找不到當前倉位記錄")
+                    
+                    # 檢查 tv_signal_close_enabled 標誌
+                    if not current_position.tv_signal_close_enabled:
+                        pending_order.status = "REJECTED"
+                        pending_order.rejected_at = datetime.now(timezone.utc)
+                        pending_order.error_message = "tv_signal_close_enabled is False"
+                        db.commit()
+                        raise HTTPException(status_code=400, detail="倉位的 tv_signal_close_enabled 為 False，無法關倉")
+                    
+                    close_order = close_futures_position(
+                        symbol=symbol,
+                        position_side=current_position.side,
+                        qty=current_position.qty,
+                        position_id=current_position.id
+                    )
+                    
+                    exit_price = get_exit_price_from_order(close_order, symbol)
+                    
+                    current_position.status = "CLOSED"
+                    current_position.closed_at = datetime.now(timezone.utc)
+                    current_position.exit_price = exit_price
+                    current_position.exit_reason = "tv_exit"
+                    db.commit()
+                    
+                    pending_order.status = "EXECUTED"
+                    pending_order.executed_at = datetime.now(timezone.utc)
+                    db.commit()
+                    
+                    logger.info(f"Pending order {order_id} 已批准並執行平倉，關閉 Position {current_position.id}")
+                    
+                    return {
+                        "success": True,
+                        "message": "訂單已批准並執行（平倉）",
+                        "pending_order_id": order_id,
+                        "closed_position_id": current_position.id,
+                    }
+            
+            # Case B: 目標為多倉 (target > 0)
+            elif target_position_size > 0:
+                target_qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
+                
+                if current_qty_signed > 0:
+                    # 已經是多倉
+                    diff = target_qty - current_qty_signed
+                    if abs(diff) < EPS:
+                        # 數量已匹配，無需操作
+                        pending_order.status = "EXECUTED"
+                        pending_order.executed_at = datetime.now(timezone.utc)
+                        pending_order.error_message = "Long quantity already matches"
+                        db.commit()
+                        return {
+                            "success": True,
+                            "message": "目標多倉數量已匹配，無需操作",
+                            "pending_order_id": order_id,
+                        }
+                    else:
+                        # 需要調整數量（簡化：先關閉再開新倉，如果差異 > 10%）
+                        if abs(diff) / current_qty_signed > 0.1:
+                            # 先關閉現有倉位
+                            if current_position:
+                                close_order = close_futures_position(
+                                    symbol=symbol,
+                                    position_side=current_position.side,
+                                    qty=current_position.qty,
+                                    position_id=current_position.id
+                                )
+                                exit_price = get_exit_price_from_order(close_order, symbol)
+                                current_position.status = "CLOSED"
+                                current_position.closed_at = datetime.now(timezone.utc)
+                                current_position.exit_price = exit_price
+                                current_position.exit_reason = "tv_rebalance"
+                                db.commit()
+                            
+                            # 開新多倉
+                            formatted_qty = format_quantity(symbol, target_qty)
+                            formatted_qty_float = float(formatted_qty)
+                            
+                            timestamp = int(time.time() * 1000)
+                            client_order_id = f"bot_{bot.id}_{timestamp}_approved"
+                            order = client.futures_create_order(
+                                symbol=symbol,
+                                side="BUY",
+                                type="MARKET",
+                                quantity=formatted_qty,
+                                newClientOrderId=client_order_id
+                            )
+                            
+                            entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
+                            
+                            trail_callback = None
+                            if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                                trail_callback = bot.trailing_callback_percent / 100.0
+                            
+                            position = Position(
+                                bot_id=bot.id,
+                                tv_signal_log_id=signal_log.id,
+                                symbol=symbol,
+                                side="LONG",
+                                qty=formatted_qty_float,
+                                status="OPEN",
+                                binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                                client_order_id=order.get("clientOrderId"),
+                                entry_price=entry_price,
+                                trail_callback=trail_callback,
+                                highest_price=entry_price if trail_callback else None,
+                            )
+                            db.add(position)
+                            db.commit()
+                            db.refresh(position)
+                            
+                            pending_order.status = "EXECUTED"
+                            pending_order.executed_at = datetime.now(timezone.utc)
+                            pending_order.position_id = position.id
+                            db.commit()
+                            
+                            return {
+                                "success": True,
+                                "message": "訂單已批准並執行（調整多倉）",
+                                "pending_order_id": order_id,
+                                "position_id": position.id,
+                            }
+                        else:
+                            # 差異小於 10%，跳過調整
+                            pending_order.status = "EXECUTED"
+                            pending_order.executed_at = datetime.now(timezone.utc)
+                            pending_order.error_message = "Quantity difference < 10%, skipped"
+                            db.commit()
+                            return {
+                                "success": True,
+                                "message": "多倉數量差異小於 10%，跳過調整",
+                                "pending_order_id": order_id,
+                            }
+                elif current_qty_signed < 0:
+                    # 當前是空倉，需要反轉為多倉
+                    # 先關閉空倉
+                    if current_position:
+                        close_order = close_futures_position(
+                            symbol=symbol,
+                            position_side=current_position.side,
+                            qty=current_position.qty,
+                            position_id=current_position.id
+                        )
+                        exit_price = get_exit_price_from_order(close_order, symbol)
+                        current_position.status = "CLOSED"
+                        current_position.closed_at = datetime.now(timezone.utc)
+                        current_position.exit_price = exit_price
+                        current_position.exit_reason = "tv_reverse_to_long"
+                        db.commit()
+                    
+                    # 開新多倉
+                    formatted_qty = format_quantity(symbol, target_qty)
+                    formatted_qty_float = float(formatted_qty)
+                    
+                    timestamp = int(time.time() * 1000)
+                    client_order_id = f"bot_{bot.id}_{timestamp}_approved"
+                    order = client.futures_create_order(
+                        symbol=symbol,
+                        side="BUY",
+                        type="MARKET",
+                        quantity=formatted_qty,
+                        newClientOrderId=client_order_id
+                    )
+                    
+                    entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
+                    
+                    trail_callback = None
+                    if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                        trail_callback = bot.trailing_callback_percent / 100.0
+                    
+                    position = Position(
+                        bot_id=bot.id,
+                        tv_signal_log_id=signal_log.id,
+                        symbol=symbol,
+                        side="LONG",
+                        qty=formatted_qty_float,
+                        status="OPEN",
+                        binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                        client_order_id=order.get("clientOrderId"),
+                        entry_price=entry_price,
+                        trail_callback=trail_callback,
+                        highest_price=entry_price if trail_callback else None,
+                    )
+                    db.add(position)
+                    db.commit()
+                    db.refresh(position)
+                    
+                    pending_order.status = "EXECUTED"
+                    pending_order.executed_at = datetime.now(timezone.utc)
+                    pending_order.position_id = position.id
+                    db.commit()
+                    
+                    return {
+                        "success": True,
+                        "message": "訂單已批准並執行（反轉為多倉）",
+                        "pending_order_id": order_id,
+                        "position_id": position.id,
+                    }
+                else:
+                    # 當前無倉位，開新多倉
+                    formatted_qty = format_quantity(symbol, target_qty)
+                    formatted_qty_float = float(formatted_qty)
+                    
+                    timestamp = int(time.time() * 1000)
+                    client_order_id = f"bot_{bot.id}_{timestamp}_approved"
+                    order = client.futures_create_order(
+                        symbol=symbol,
+                        side="BUY",
+                        type="MARKET",
+                        quantity=formatted_qty,
+                        newClientOrderId=client_order_id
+                    )
+                    
+                    entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
+                    
+                    trail_callback = None
+                    if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                        trail_callback = bot.trailing_callback_percent / 100.0
+                    
+                    position = Position(
+                        bot_id=bot.id,
+                        tv_signal_log_id=signal_log.id,
+                        symbol=symbol,
+                        side="LONG",
+                        qty=formatted_qty_float,
+                        status="OPEN",
+                        binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                        client_order_id=order.get("clientOrderId"),
+                        entry_price=entry_price,
+                        trail_callback=trail_callback,
+                        highest_price=entry_price if trail_callback else None,
+                    )
+                    db.add(position)
+                    db.commit()
+                    db.refresh(position)
+                    
+                    pending_order.status = "EXECUTED"
+                    pending_order.executed_at = datetime.now(timezone.utc)
+                    pending_order.position_id = position.id
+                    db.commit()
+                    
+                    return {
+                        "success": True,
+                        "message": "訂單已批准並執行（開多倉）",
+                        "pending_order_id": order_id,
+                        "position_id": position.id,
+                    }
+            
+            # Case C: 目標為空倉 (target < 0)
+            else:  # target_position_size < 0
+                target_qty = calculate_qty_from_max_invest(bot, symbol, target_qty=None)
+                
+                if current_qty_signed < 0:
+                    # 已經是空倉
+                    diff = abs(target_qty) - abs(current_qty_signed)
+                    if abs(diff) < EPS:
+                        # 數量已匹配，無需操作
+                        pending_order.status = "EXECUTED"
+                        pending_order.executed_at = datetime.now(timezone.utc)
+                        pending_order.error_message = "Short quantity already matches"
+                        db.commit()
+                        return {
+                            "success": True,
+                            "message": "目標空倉數量已匹配，無需操作",
+                            "pending_order_id": order_id,
+                        }
+                    else:
+                        # 需要調整數量
+                        if abs(diff) / abs(current_qty_signed) > 0.1:
+                            # 先關閉現有倉位
+                            if current_position:
+                                close_order = close_futures_position(
+                                    symbol=symbol,
+                                    position_side=current_position.side,
+                                    qty=current_position.qty,
+                                    position_id=current_position.id
+                                )
+                                exit_price = get_exit_price_from_order(close_order, symbol)
+                                current_position.status = "CLOSED"
+                                current_position.closed_at = datetime.now(timezone.utc)
+                                current_position.exit_price = exit_price
+                                current_position.exit_reason = "tv_rebalance"
+                                db.commit()
+                            
+                            # 開新空倉
+                            formatted_qty = format_quantity(symbol, target_qty)
+                            formatted_qty_float = float(formatted_qty)
+                            
+                            timestamp = int(time.time() * 1000)
+                            client_order_id = f"bot_{bot.id}_{timestamp}_approved"
+                            order = client.futures_create_order(
+                                symbol=symbol,
+                                side="SELL",
+                                type="MARKET",
+                                quantity=formatted_qty,
+                                newClientOrderId=client_order_id
+                            )
+                            
+                            entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
+                            
+                            trail_callback = None
+                            if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                                trail_callback = bot.trailing_callback_percent / 100.0
+                            
+                            position = Position(
+                                bot_id=bot.id,
+                                tv_signal_log_id=signal_log.id,
+                                symbol=symbol,
+                                side="SHORT",
+                                qty=formatted_qty_float,
+                                status="OPEN",
+                                binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                                client_order_id=order.get("clientOrderId"),
+                                entry_price=entry_price,
+                                trail_callback=trail_callback,
+                                highest_price=entry_price if trail_callback else None,
+                            )
+                            db.add(position)
+                            db.commit()
+                            db.refresh(position)
+                            
+                            pending_order.status = "EXECUTED"
+                            pending_order.executed_at = datetime.now(timezone.utc)
+                            pending_order.position_id = position.id
+                            db.commit()
+                            
+                            return {
+                                "success": True,
+                                "message": "訂單已批准並執行（調整空倉）",
+                                "pending_order_id": order_id,
+                                "position_id": position.id,
+                            }
+                        else:
+                            # 差異小於 10%，跳過調整
+                            pending_order.status = "EXECUTED"
+                            pending_order.executed_at = datetime.now(timezone.utc)
+                            pending_order.error_message = "Quantity difference < 10%, skipped"
+                            db.commit()
+                            return {
+                                "success": True,
+                                "message": "空倉數量差異小於 10%，跳過調整",
+                                "pending_order_id": order_id,
+                            }
+                elif current_qty_signed > 0:
+                    # 當前是多倉，需要反轉為空倉
+                    # 先關閉多倉
+                    if current_position:
+                        close_order = close_futures_position(
+                            symbol=symbol,
+                            position_side=current_position.side,
+                            qty=current_position.qty,
+                            position_id=current_position.id
+                        )
+                        exit_price = get_exit_price_from_order(close_order, symbol)
+                        current_position.status = "CLOSED"
+                        current_position.closed_at = datetime.now(timezone.utc)
+                        current_position.exit_price = exit_price
+                        current_position.exit_reason = "tv_reverse_to_short"
+                        db.commit()
+                    
+                    # 開新空倉
+                    formatted_qty = format_quantity(symbol, target_qty)
+                    formatted_qty_float = float(formatted_qty)
+                    
+                    timestamp = int(time.time() * 1000)
+                    client_order_id = f"bot_{bot.id}_{timestamp}_approved"
+                    order = client.futures_create_order(
+                        symbol=symbol,
+                        side="SELL",
+                        type="MARKET",
+                        quantity=formatted_qty,
+                        newClientOrderId=client_order_id
+                    )
+                    
+                    entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
+                    
+                    trail_callback = None
+                    if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                        trail_callback = bot.trailing_callback_percent / 100.0
+                    
+                    position = Position(
+                        bot_id=bot.id,
+                        tv_signal_log_id=signal_log.id,
+                        symbol=symbol,
+                        side="SHORT",
+                        qty=formatted_qty_float,
+                        status="OPEN",
+                        binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                        client_order_id=order.get("clientOrderId"),
+                        entry_price=entry_price,
+                        trail_callback=trail_callback,
+                        highest_price=entry_price if trail_callback else None,
+                    )
+                    db.add(position)
+                    db.commit()
+                    db.refresh(position)
+                    
+                    pending_order.status = "EXECUTED"
+                    pending_order.executed_at = datetime.now(timezone.utc)
+                    pending_order.position_id = position.id
+                    db.commit()
+                    
+                    return {
+                        "success": True,
+                        "message": "訂單已批准並執行（反轉為空倉）",
+                        "pending_order_id": order_id,
+                        "position_id": position.id,
+                    }
+                else:
+                    # 當前無倉位，開新空倉
+                    formatted_qty = format_quantity(symbol, target_qty)
+                    formatted_qty_float = float(formatted_qty)
+                    
+                    timestamp = int(time.time() * 1000)
+                    client_order_id = f"bot_{bot.id}_{timestamp}_approved"
+                    order = client.futures_create_order(
+                        symbol=symbol,
+                        side="SELL",
+                        type="MARKET",
+                        quantity=formatted_qty,
+                        newClientOrderId=client_order_id
+                    )
+                    
+                    entry_price = float(order.get("avgPrice", 0)) or get_mark_price(symbol) or 0.0
+                    
+                    trail_callback = None
+                    if bot.use_dynamic_stop and bot.trailing_callback_percent is not None:
+                        trail_callback = bot.trailing_callback_percent / 100.0
+                    
+                    position = Position(
+                        bot_id=bot.id,
+                        tv_signal_log_id=signal_log.id,
+                        symbol=symbol,
+                        side="SHORT",
+                        qty=formatted_qty_float,
+                        status="OPEN",
+                        binance_order_id=int(order.get("orderId")) if order.get("orderId") else None,
+                        client_order_id=order.get("clientOrderId"),
+                        entry_price=entry_price,
+                        trail_callback=trail_callback,
+                        highest_price=entry_price if trail_callback else None,
+                    )
+                    db.add(position)
+                    db.commit()
+                    db.refresh(position)
+                    
+                    pending_order.status = "EXECUTED"
+                    pending_order.executed_at = datetime.now(timezone.utc)
+                    pending_order.position_id = position.id
+                    db.commit()
+                    
+                    return {
+                        "success": True,
+                        "message": "訂單已批准並執行（開空倉）",
+                        "pending_order_id": order_id,
+                        "position_id": position.id,
+                    }
+            
+    except Exception as e:
+        logger.exception(f"批准並執行 pending_order {order_id} 失敗: {e}")
+        
+        # 更新 pending_order 為 FAILED
+        pending_order.status = "FAILED"
+        pending_order.error_message = str(e)
+        db.commit()
+        
+        raise HTTPException(status_code=500, detail=f"執行失敗: {str(e)}")
+
+
+@app.post("/pending-orders/{order_id}/reject", response_model=dict)
+async def reject_pending_order(
+    order_id: int,
+    user: dict = Depends(require_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    拒絕待批准訂單
+    
+    此端點會將待批准訂單標記為 REJECTED，不會執行任何交易。
+    
+    此端點僅限已登入且通過管理員驗證的使用者使用。
+    
+    Args:
+        order_id: Pending Order ID
+        user: 管理員使用者資訊（由 Depends(require_admin_user) 自動驗證）
+        db: 資料庫 Session
+    
+    Returns:
+        dict: 拒絕結果
+    
+    Raises:
+        HTTPException: 當訂單不存在或狀態不正確時
+    """
+    pending_order = db.query(PendingOrder).filter(PendingOrder.id == order_id).first()
+    if not pending_order:
+        raise HTTPException(status_code=404, detail=f"找不到 pending_order {order_id}")
+    
+    if pending_order.status != "PENDING":
+        raise HTTPException(status_code=400, detail=f"訂單狀態為 {pending_order.status}，無法拒絕（僅 PENDING 狀態可拒絕）")
+    
+    pending_order.status = "REJECTED"
+    pending_order.rejected_at = datetime.now(timezone.utc)
+    db.commit()
+    
+    logger.info(f"Pending order {order_id} 已被拒絕")
+    
+    return {
+        "success": True,
+        "message": f"訂單已拒絕",
+        "pending_order_id": order_id,
     }
 
 

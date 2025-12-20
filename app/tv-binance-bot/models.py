@@ -246,6 +246,9 @@ class BotConfig(Base):
     trailing_callback_percent = Column(Float, nullable=True, comment="追蹤停損回調百分比，0~100，例如 1.0 代表 1%")
     base_stop_loss_pct = Column(Float, nullable=False, default=3.0, comment="基礎停損距離 (%)")
     
+    # 交易模式設定
+    trading_mode = Column(String(20), default="auto", nullable=False, comment="交易模式：auto（自動執行）, semi-auto（需使用者批准）, manual（僅手動）")
+    
     # 時間戳記
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="建立時間")
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, comment="更新時間")
@@ -270,9 +273,85 @@ class BotConfig(Base):
             "use_dynamic_stop": self.use_dynamic_stop,
             "trailing_callback_percent": self.trailing_callback_percent,
             "base_stop_loss_pct": self.base_stop_loss_pct,
+            "trading_mode": self.trading_mode,
             "signal_id": self.signal_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class PendingOrder(Base):
+    """
+    待批准訂單模型
+    
+    當 Bot 的 trading_mode 為 'semi-auto' 時，收到的交易訊號會先存入此表等待使用者批准。
+    """
+    
+    __tablename__ = "pending_orders"
+    
+    # 主鍵
+    id = Column(Integer, primary_key=True, index=True, comment="Pending Order ID")
+    
+    # Bot 和 Signal 關聯
+    bot_id = Column(Integer, ForeignKey("bot_configs.id"), nullable=False, index=True, comment="關聯的 Bot ID")
+    bot = relationship("BotConfig", foreign_keys=[bot_id])
+    tv_signal_log_id = Column(Integer, ForeignKey("tv_signal_logs.id"), nullable=False, index=True, comment="關聯的 TradingView Signal Log ID")
+    signal_log = relationship("TradingViewSignalLog", foreign_keys=[tv_signal_log_id])
+    
+    # 交易資訊（從 signal 中提取，用於顯示）
+    symbol = Column(String(20), nullable=False, index=True, comment="交易對，例如：BTCUSDT")
+    side = Column(String(10), nullable=False, comment="交易方向：BUY 或 SELL（訂單導向）或 LONG/SHORT（位置導向）")
+    qty = Column(Float, nullable=True, comment="交易數量（如果可計算）")
+    position_size = Column(Float, nullable=True, comment="目標倉位大小（位置導向模式），>0=多倉，<0=空倉，0=平倉")
+    
+    # 預計算的交易參數（用於批准後執行）
+    # 這些欄位儲存了執行交易所需的所有資訊
+    calculated_qty = Column(Float, nullable=True, comment="計算後的實際交易數量")
+    calculated_side = Column(String(10), nullable=True, comment="計算後的實際交易方向（BUY/SELL）")
+    is_position_based = Column(Boolean, default=False, nullable=False, comment="是否為位置導向模式")
+    
+    # 狀態
+    # PENDING: 等待批准
+    # APPROVED: 已批准，正在執行
+    # REJECTED: 已拒絕
+    # EXECUTED: 已執行（執行成功）
+    # FAILED: 執行失敗
+    status = Column(String(20), default="PENDING", nullable=False, index=True, comment="狀態：PENDING, APPROVED, REJECTED, EXECUTED, FAILED")
+    
+    # 處理資訊
+    approved_at = Column(DateTime(timezone=True), nullable=True, comment="批准時間")
+    rejected_at = Column(DateTime(timezone=True), nullable=True, comment="拒絕時間")
+    executed_at = Column(DateTime(timezone=True), nullable=True, comment="執行時間")
+    error_message = Column(Text, nullable=True, comment="錯誤訊息（如果執行失敗）")
+    position_id = Column(Integer, nullable=True, comment="執行後建立的 Position ID（如果成功）")
+    
+    # 時間戳記
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, comment="建立時間（收到訊號時間）")
+    
+    def __repr__(self):
+        """字串表示，方便除錯"""
+        return f"<PendingOrder(id={self.id}, bot_id={self.bot_id}, symbol={self.symbol}, side={self.side}, status={self.status})>"
+    
+    def to_dict(self):
+        """將模型轉換為字典"""
+        return {
+            "id": self.id,
+            "bot_id": self.bot_id,
+            "tv_signal_log_id": self.tv_signal_log_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "qty": self.qty,
+            "position_size": self.position_size,
+            "calculated_qty": self.calculated_qty,
+            "calculated_side": self.calculated_side,
+            "is_position_based": self.is_position_based,
+            "status": self.status,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "rejected_at": self.rejected_at.isoformat() if self.rejected_at else None,
+            "executed_at": self.executed_at.isoformat() if self.executed_at else None,
+            "error_message": self.error_message,
+            "position_id": self.position_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
