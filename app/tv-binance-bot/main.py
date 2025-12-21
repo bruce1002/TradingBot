@@ -7538,10 +7538,10 @@ async def clear_executed_pending_orders(
     db: Session = Depends(get_db)
 ):
     """
-    清除所有狀態為 EXECUTED 的待批准訂單
+    清除所有狀態為 EXECUTED 或 REJECTED 的待批准訂單
     
-    此端點會刪除所有 status='EXECUTED' 的 pending orders，用於清理已完成執行的訂單記錄。
-    只會刪除 EXECUTED 狀態的訂單，不會影響 PENDING、REJECTED、FAILED 等狀態的訂單。
+    此端點會刪除所有 status='EXECUTED' 或 status='REJECTED' 的 pending orders，用於清理已完成執行或已拒絕的訂單記錄。
+    只會刪除 EXECUTED 和 REJECTED 狀態的訂單，不會影響 PENDING、APPROVED、FAILED 等狀態的訂單。
     
     此端點僅限已登入且通過管理員驗證的使用者使用。
     
@@ -7556,34 +7556,53 @@ async def clear_executed_pending_orders(
         HTTPException: 當資料庫操作失敗時
     """
     try:
-        # 查詢所有 EXECUTED 狀態的 pending orders
-        executed_orders = db.query(PendingOrder).filter(PendingOrder.status == "EXECUTED").all()
+        # 查詢所有 EXECUTED 和 REJECTED 狀態的 pending orders
+        orders_to_delete = db.query(PendingOrder).filter(
+            or_(
+                PendingOrder.status == "EXECUTED",
+                PendingOrder.status == "REJECTED"
+            )
+        ).all()
         
-        count = len(executed_orders)
+        count = len(orders_to_delete)
         
         if count == 0:
             return {
                 "success": True,
-                "message": "沒有 EXECUTED 狀態的訂單需要清除",
+                "message": "沒有 EXECUTED 或 REJECTED 狀態的訂單需要清除",
                 "deleted_count": 0
             }
         
-        # 刪除所有 EXECUTED 狀態的訂單
-        for order in executed_orders:
+        # 統計各種狀態的數量
+        executed_count = sum(1 for o in orders_to_delete if o.status == "EXECUTED")
+        rejected_count = sum(1 for o in orders_to_delete if o.status == "REJECTED")
+        
+        # 刪除所有 EXECUTED 和 REJECTED 狀態的訂單
+        for order in orders_to_delete:
             db.delete(order)
         
         db.commit()
         
-        logger.info(f"清除 {count} 個 EXECUTED 狀態的 pending orders")
+        logger.info(f"清除 {count} 個 pending orders（EXECUTED: {executed_count}, REJECTED: {rejected_count}）")
+        
+        message = f"成功清除 {count} 個訂單"
+        if executed_count > 0 and rejected_count > 0:
+            message += f"（EXECUTED: {executed_count}, REJECTED: {rejected_count}）"
+        elif executed_count > 0:
+            message += f"（EXECUTED: {executed_count}）"
+        elif rejected_count > 0:
+            message += f"（REJECTED: {rejected_count}）"
         
         return {
             "success": True,
-            "message": f"成功清除 {count} 個 EXECUTED 狀態的訂單",
-            "deleted_count": count
+            "message": message,
+            "deleted_count": count,
+            "executed_count": executed_count,
+            "rejected_count": rejected_count
         }
     except Exception as e:
         db.rollback()
-        logger.error(f"清除 EXECUTED pending orders 失敗: {e}", exc_info=True)
+        logger.error(f"清除 EXECUTED/REJECTED pending orders 失敗: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"清除失敗: {str(e)}")
 
 

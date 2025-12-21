@@ -3167,9 +3167,9 @@ async function rejectPendingOrder(orderId) {
   }
 }
 
-// 清除所有 EXECUTED 狀態的 Pending Orders
+// 清除所有 EXECUTED 和 REJECTED 狀態的 Pending Orders
 async function clearExecutedPendingOrders() {
-  const confirmMsg = `確定要清除所有 EXECUTED 狀態的待批准訂單嗎？\n\n此操作會永久刪除這些記錄，無法復原。\n\n注意：只會刪除 EXECUTED 狀態的訂單，不會影響其他狀態的訂單。`;
+  const confirmMsg = `確定要清除所有 EXECUTED 和 REJECTED 狀態的待批准訂單嗎？\n\n此操作會永久刪除這些記錄，無法復原。\n\n注意：只會刪除 EXECUTED 和 REJECTED 狀態的訂單，不會影響其他狀態的訂單。`;
   
   if (!confirm(confirmMsg)) {
     return;
@@ -3191,12 +3191,22 @@ async function clearExecutedPendingOrders() {
     }
     
     const result = await resp.json();
-    alert(`✓ ${result.message || `成功清除 ${result.deleted_count || 0} 個訂單`}`);
+    let alertMessage = result.message || `成功清除 ${result.deleted_count || 0} 個訂單`;
+    if (result.executed_count !== undefined && result.rejected_count !== undefined) {
+      if (result.executed_count > 0 && result.rejected_count > 0) {
+        alertMessage = `✓ 成功清除 ${result.deleted_count} 個訂單（EXECUTED: ${result.executed_count}, REJECTED: ${result.rejected_count}）`;
+      } else if (result.executed_count > 0) {
+        alertMessage = `✓ 成功清除 ${result.executed_count} 個 EXECUTED 訂單`;
+      } else if (result.rejected_count > 0) {
+        alertMessage = `✓ 成功清除 ${result.rejected_count} 個 REJECTED 訂單`;
+      }
+    }
+    alert(alertMessage);
     
     // 重新載入 Pending Orders
     await loadPendingOrders();
   } catch (error) {
-    console.error("清除 EXECUTED pending orders 失敗:", error);
+    console.error("清除 EXECUTED/REJECTED pending orders 失敗:", error);
     alert(`清除失敗：${error.message}`);
   }
 }
