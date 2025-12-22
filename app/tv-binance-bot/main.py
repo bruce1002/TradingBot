@@ -2322,6 +2322,31 @@ async def dashboard(
 
 # ==================== 工具 API ====================
 
+@app.get("/api/whoami")
+async def whoami(request: Request):
+    """
+    取得當前使用者的 email（來自 Cloudflare Access）
+    
+    從 request headers 讀取 Cf-Access-Authenticated-User-Email，
+    這是 Cloudflare Access 在驗證後自動注入的 header。
+    
+    ⚠️ 此端點信任 Cloudflare Access 的驗證（已在邊界驗證），
+    不進行額外的 JWT 驗證或 OAuth 驗證。
+    
+    Returns:
+        dict: {"email": "<user email or 'unknown'>"}
+    """
+    # 從 Cloudflare Access header 讀取 email
+    cf_email = request.headers.get("Cf-Access-Authenticated-User-Email")
+    
+    if cf_email:
+        return {"email": cf_email}
+    else:
+        # 如果沒有 Cloudflare Access header，返回 unknown
+        # 這可能發生在開發環境或未通過 Cloudflare Access 的情況
+        return {"email": "unknown"}
+
+
 @app.get("/api/mark-price/{symbol}")
 async def get_mark_price_api(
     symbol: str,

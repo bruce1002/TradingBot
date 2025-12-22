@@ -829,6 +829,28 @@ async function handleFetchError(response) {
 // 載入使用者資訊
 async function loadUserInfo() {
   try {
+    // 【新增】優先從 Cloudflare Access 取得真實 email
+    try {
+      const whoamiResponse = await fetch("/api/whoami");
+      if (whoamiResponse.ok) {
+        const whoamiData = await whoamiResponse.json();
+        const cfEmail = whoamiData.email;
+        
+        // 如果取得 Cloudflare Access email 且不是 "unknown"，更新顯示
+        if (cfEmail && cfEmail !== "unknown") {
+          const userEmailEl = document.getElementById("user-email");
+          if (userEmailEl) {
+            userEmailEl.textContent = `登入帳號：${cfEmail}`;
+          }
+          // 取得 Cloudflare Access email 後，仍繼續載入其他資訊（binance_mode 等）
+        }
+      }
+    } catch (whoamiError) {
+      // 如果 /api/whoami 失敗，繼續使用原本的 /me 端點
+      console.warn("無法從 Cloudflare Access 取得 email，使用備用方式:", whoamiError);
+    }
+    
+    // 載入其他使用者資訊（binance_mode, tradingview_secret 等）
     const response = await fetch("/me");
     // Demo 模式下，即使返回 401 也不重定向（後端會自動允許訪問）
     if (response.status === 401) {
@@ -847,10 +869,16 @@ async function loadUserInfo() {
       tradingviewSecret = data.tradingview_secret;
     }
     
-    // 更新 user-email
+    // 【修改】只有在沒有從 Cloudflare Access 取得 email 時，才使用 /me 的 email
     const userEmailEl = document.getElementById("user-email");
     if (userEmailEl) {
-      userEmailEl.textContent = `登入帳號：${data.user_email || "未知"}`;
+      // 檢查是否已經從 Cloudflare Access 更新過（不是 "未知" 且不是 "Demo Mode"）
+      const currentText = userEmailEl.textContent;
+      if (currentText.includes("未知") || currentText.includes("Demo Mode")) {
+        // 如果還是預設值，使用 /me 的 email
+        userEmailEl.textContent = `登入帳號：${data.user_email || "未知"}`;
+      }
+      // 否則保持 Cloudflare Access 的 email
     }
     
     // 更新 binance-mode-badge
@@ -874,7 +902,11 @@ async function loadUserInfo() {
     // 設置默認值
     const userEmailEl = document.getElementById("user-email");
     if (userEmailEl) {
-      userEmailEl.textContent = "登入帳號：Demo Mode";
+      // 【修改】只有在還沒有從 Cloudflare Access 取得 email 時，才設置預設值
+      const currentText = userEmailEl.textContent;
+      if (currentText.includes("未知") || currentText.includes("Demo Mode")) {
+        userEmailEl.textContent = "登入帳號：Demo Mode";
+      }
     }
     const badgeEl = document.getElementById("binance-mode-badge");
     if (badgeEl) {
@@ -884,16 +916,10 @@ async function loadUserInfo() {
   }
 }
 
-// 登出
+// 登出（Cloudflare Access Logout）
 function handleLogout() {
-  fetch("/auth/logout", { method: "POST" })
-    .then(() => {
-      window.location.href = "/auth/login/google";
-    })
-    .catch((error) => {
-      console.error("登出失敗:", error);
-      window.location.href = "/auth/login/google";
-    });
+  // 直接跳轉到 Cloudflare Access 登出 URL
+  window.location.href = "https://dashboard.tv-bots.com/cdn-cgi/access/logout";
 }
 
 // ==================== Trailing Settings ====================
